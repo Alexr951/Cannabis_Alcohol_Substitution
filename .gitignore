@@ -1,0 +1,20 @@
+# LaTeX paper source and build artifacts. The compiled paper lives at the repo
+# root as Cannabis_Alcohol_Substitution.pdf, which is all a GitHub viewer needs.
+paper/
+
+# v1 draft and scratch (kept locally, not needed on GitHub)
+archive_v1/
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Pipeline caches (regenerate via Rscript run_all.R; results CSVs are kept)
+Results/cache/
+Data/processed/
+Data/external/_tmp/
+
+# Stale v1-only raw inputs (used by archive_v1/, not the current pipeline)
+Data/ACSST1Y2013.S0101-*.csv
+Data/covariates_2013.csv

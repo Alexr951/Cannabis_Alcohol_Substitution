@@ -1,0 +1,8 @@
+fips,state,t0,pre_rmspe,donor_placebo_median_rmspe,rel_to_placebo,passes_fit,sd_pre_outcome,ratio_own_sd,passes_own_sd_diag,chow_excluded,included
+2,Alaska,2016,0.05211,0.01215,4.287,0,0.0558,0.934,0,0,0
+6,California,2018,0.00711,0.01292,0.55,1,0.02023,0.352,1,0,1
+8,Colorado,2014,0.01835,0.01255,1.462,1,0.02123,0.865,0,0,1
+25,Massachusetts,2018,0.00678,0.01292,0.525,1,0.01581,0.429,1,0,1
+32,Nevada,2017,0.06015,0.01185,5.075,0,0.0421,1.429,0,0,0
+41,Oregon,2015,0.01503,0.01231,1.221,1,0.05215,0.288,1,0,1
+53,Washington,2014,0.01489,0.01255,1.186,1,0.03209,0.464,1,0,1

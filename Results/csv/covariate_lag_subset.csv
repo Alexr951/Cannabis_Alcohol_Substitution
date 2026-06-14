@@ -1,0 +1,6 @@
+fips,state,t0,att_outcome_only,att_lagsubset_cov,covariates_used
+6,California,2018,0.09618224716470664,0.10567467836347288,real_gdp_pc+unemp_rate+share_20_34+beer_tax_per_gal
+8,Colorado,2014,0.019980023999432033,0.02124140746070598,real_gdp_pc+unemp_rate+share_20_34+beer_tax_per_gal
+25,Massachusetts,2018,0.015302791651761294,-0.03347368417133578,real_gdp_pc+unemp_rate+share_20_34+beer_tax_per_gal
+41,Oregon,2015,0.021748213240340864,0.06286929751958689,real_gdp_pc+unemp_rate+share_20_34+beer_tax_per_gal
+53,Washington,2014,-0.017409829135081895,-0.06966471360009578,real_gdp_pc+unemp_rate+share_20_34+beer_tax_per_gal

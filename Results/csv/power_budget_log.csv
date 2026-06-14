@@ -1,0 +1,2 @@
+decision,projected_min,n_primary,n_spot,sdid_reps,gsyn_boots,deltas
+"full grid, all estimators (envelope MDE)",53.3,400,200,25,100,0 -0.02 -0.05 -0.08 -0.12
