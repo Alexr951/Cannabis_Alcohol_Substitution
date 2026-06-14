@@ -5,9 +5,7 @@ paper/
 # v1 draft and scratch (kept locally, not needed on GitHub)
 archive_v1/
 
-# Python
-__pycache__/
-*.pyc
+# Jupyter
 .ipynb_checkpoints/
 
 # Pipeline caches (regenerate via Rscript run_all.R; results CSVs are kept)

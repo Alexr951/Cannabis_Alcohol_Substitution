@@ -1,4 +1,4 @@
-# Cannabis-Alcohol ASCM paper — Python side, pinned to the environment used to
+# Cannabis-Alcohol ASCM paper: Python side, pinned to the environment used to
 # produce all results. Python 3.13.5 (Anaconda). Install into a fresh env, then
 # Restart & Run All the notebook. (Estimation runs in R; see R/00_setup.R.)
 numpy==2.4.2
