@@ -47,7 +47,7 @@
     heroInline = buildHeroEnv(d3.select("#hero"), 680, 408, false);
     seInline = buildSEEnv(d3.select("#se"), 680, 230, false);
     powInline = buildPowerEnv(d3.select("#power"), 520, 432, false);
-    plaInline = buildPlaceboEnv(d3.select("#placebo"), 680, 400, false);
+    plaInline = buildPlaceboEnv(d3.select("#placebo"), 680, 300, false);
     initModal();
     fillMdeCallout();
     update(true);
@@ -168,6 +168,7 @@
   function refreshHeroLabels() {
     document.getElementById("hero-est").textContent = DATA.estimators[state.focus].label;
     document.getElementById("se-est").textContent = DATA.estimators[state.focus].label;
+    document.getElementById("pla-est").textContent = DATA.estimators[state.focus].label;
     document.getElementById("se-verdict").textContent = seVerdict();
     updateChartAria();
   }
@@ -194,11 +195,19 @@
     d3.select("#power").attr("aria-label", "Power curves. At a true effect of " + d + ", " + est +
       " rejects " + pct1(c.reject_ri) + " of draws under the calibrated test.");
     if (DATA.placebo) {
-      var m = DATA.placebo.focus_map[state.focus] || "classic_scm", s = DATA.placebo.single[m];
-      d3.select("#placebo").attr("aria-label", "Backdated placebo distributions. " + s.label +
-        " fake effects center at " + eff1(s.mean) + " with a spread of " + eff1(s.sd) +
-        " per estimate; a true effect of " + d +
-        (dkDec(state.dk) >= placeboEdge() ? " sits inside this noise floor." : " clears this noise floor."));
+      var m = DATA.placebo.focus_map[state.focus];
+      var verdict = dkDec(state.dk) >= placeboEdge() ? " sits inside this noise floor." : " clears this noise floor.";
+      if (m) {
+        var s = DATA.placebo.single[m];
+        d3.select("#placebo").attr("aria-label", "Backdated placebo noise for " + s.label +
+          ": fake effects center at " + eff1(s.mean) + " with a spread of " + eff1(s.sd) +
+          " per estimate; a true effect of " + d + verdict);
+      } else {
+        var p = DATA.placebo.pooled2009[state.focus];
+        d3.select("#placebo").attr("aria-label", "Pooled fake-2009 placebo for " + est +
+          ": estimate " + eff1(p.att) + " with standard error " + eff1(p.se) +
+          "; a true effect of " + d + verdict);
+      }
     }
   }
 
@@ -564,6 +573,7 @@
   function drawPlaceboStatic(env) {
     var g = env.gStatic; g.selectAll("*").remove();
     var P = DATA.placebo; if (!P) return;
+    if (!env.detail) { drawPlaceboFocus(env, g, P); return; }   // inline: focused estimator only
     var fs = env.detail ? 12 : 11, sub = env.detail ? 11 : 10;
     // domain from the committed values themselves plus the delta grid
     var lo = -0.13, hi = 0.02;
@@ -650,6 +660,89 @@
         .text("classic SCM is the single-unit analogue of the partially-pooled ASCM");
     }
   }
+  // Inline view: one noise distribution for the focused estimator, matching the
+  // hero's one-thing-per-panel grammar. The modal keeps the full comparison.
+  function drawPlaceboFocus(env, g, P) {
+    var fs = 11, sub = 10;
+    var m = P.focus_map[state.focus];
+    // stable domain across focus switches: all swarms, pooled intervals, real
+    // pooled estimates, and the delta grid (per-state reals live in the modal)
+    var lo = -0.13, hi = 0.02;
+    P.single_order.forEach(function (mm) {
+      P.single[mm].values.forEach(function (v) { lo = Math.min(lo, v.att); hi = Math.max(hi, v.att); });
+    });
+    DATA.meta.estimator_order.forEach(function (est) {
+      if (P.real.pooled[est] != null) { lo = Math.min(lo, P.real.pooled[est]); hi = Math.max(hi, P.real.pooled[est]); }
+      var pp = P.pooled2009[est];
+      if (pp) { lo = Math.min(lo, pp.att - 2 * pp.se); hi = Math.max(hi, pp.att + 2 * pp.se); }
+    });
+    env.x.domain([lo - 0.01, hi + 0.012]);
+
+    var yc = env.ph * 0.56, bandH = env.ph * 0.30;
+    g.append("line").attr("x1", env.x(0)).attr("x2", env.x(0)).attr("y1", 22).attr("y2", env.ph)
+      .attr("stroke", C.rule).attr("stroke-width", 1);
+
+    function bandAndTick(center, half) {
+      g.append("rect").attr("x", env.x(center - half)).attr("y", yc - bandH / 2)
+        .attr("width", env.x(center + half) - env.x(center - half)).attr("height", bandH).attr("rx", 3)
+        .attr("fill", C.jack).attr("opacity", 0.15);
+      g.append("line").attr("x1", env.x(center)).attr("x2", env.x(center))
+        .attr("y1", yc - bandH * 0.72).attr("y2", yc + bandH * 0.72)
+        .attr("stroke", C.ink).attr("stroke-width", 1.4).attr("opacity", 0.8);
+      g.append("text").attr("x", env.x(center)).attr("y", yc - bandH * 0.72 - 6).attr("text-anchor", "middle")
+        .attr("class", "ax-note").style("font-size", sub + "px").attr("fill", C.inkFaint).text("mean ± 2 SD");
+    }
+
+    if (m) {
+      var s = P.single[m];
+      g.append("text").attr("x", 0).attr("y", 12).attr("class", "ax-label").style("font-size", fs + "px")
+        .attr("fill", C.ink).style("font-weight", "600")
+        .text(s.label + "  ·  " + s.n + " backdated runs where nothing happened  ·  mean " +
+          eff1(s.mean) + ", sd " + (Math.abs(s.sd) * 100).toFixed(1) + "pp");
+      bandAndTick(s.mean, 2 * s.sd);
+      s.values.forEach(function (v, j) {
+        var jit = (((j * 7919) % 17) - 8) / 8 * bandH * 0.42;   // deterministic jitter
+        g.append("circle").attr("cx", env.x(v.att)).attr("cy", yc + jit).attr("r", 2.8)
+          .attr("fill", C.inkFaint).attr("opacity", 0.7);
+      });
+    } else {
+      var p = P.pooled2009[state.focus];
+      g.append("text").attr("x", 0).attr("y", 12).attr("class", "ax-label").style("font-size", fs + "px")
+        .attr("fill", C.ink).style("font-weight", "600")
+        .text(DATA.estimators[state.focus].label + "  ·  pooled fake-2009 placebo  ·  estimate " +
+          eff1(p.att) + ", se " + (Math.abs(p.se) * 100).toFixed(1) + "pp");
+      bandAndTick(p.att, 2 * p.se);
+    }
+
+    // the real (non-placebo) estimate for the focused estimator
+    var ra = P.real.pooled[state.focus];
+    if (ra != null) {
+      placeboDiamond(g, env.x(ra), yc, 6, C.cal);
+      var rx = Math.min(Math.max(env.x(ra), 42), env.pw - 42);
+      g.append("text").attr("x", rx).attr("y", yc + bandH / 2 + 18).attr("text-anchor", "middle")
+        .attr("class", "ax-note").style("font-size", sub + "px").attr("fill", C.cal).text("real estimate");
+    }
+
+    // axis + footnotes
+    var ax = d3.axisBottom(env.x).tickValues([-0.12, -0.08, -0.04, 0, 0.04].filter(function (t) {
+      var d = env.x.domain(); return t >= d[0] && t <= d[1];
+    })).tickFormat(function (d) { return (d < 0 ? "−" : "") + Math.abs(Math.round(d * 100)); }).tickSize(4);
+    var gx = g.append("g").attr("transform", "translate(0," + env.ph + ")").call(ax);
+    gx.selectAll("text").attr("class", "tick").style("font-size", fs + "px");
+    gx.select(".domain").attr("stroke", C.rule);
+    g.append("text").attr("class", "ax-label").attr("x", env.pw).attr("y", env.ph + 36)
+      .attr("text-anchor", "end").style("font-size", fs + "px").text("fake effect (%)");
+    if (!m) {
+      g.append("text").attr("x", 0).attr("y", env.ph + 36).attr("class", "ax-note").style("font-size", sub + "px")
+        .attr("fill", C.inkFaint)
+        .text("single-state backdating was not run for " + DATA.estimators[state.focus].short + "; its pooled placebo is shown");
+    } else if (state.focus === "multisynth") {
+      g.append("text").attr("x", 0).attr("y", env.ph + 36).attr("class", "ax-note").style("font-size", sub + "px")
+        .attr("fill", C.inkFaint)
+        .text("classic SCM is the single-unit analogue of the partially-pooled ASCM");
+    }
+  }
+
   function drawPlaceboMarker(env) {
     var gl = env.gMarkerLine, gt = env.gMarkerLab;
     gl.selectAll("*").remove(); gt.selectAll("*").remove();

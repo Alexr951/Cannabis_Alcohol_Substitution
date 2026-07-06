@@ -90,15 +90,16 @@
         <div class="panel-head">
           <h2>The observed noise floor</h2>
           <p class="panel-sub">
-            Backdated in-time placebos: fake effects estimated where no treatment
-            occurred. The method finds effects where there are none, of the same
-            size as the substitution we would hope to detect. Diamonds are the
-            real estimates, sitting inside that noise.
+            Fake effects estimated where no treatment occurred, for
+            <span id="pla-est" class="est-name">the focused estimator</span>.
+            When the dashed marker sits inside the band, a true effect of that
+            size is indistinguishable from nothing. The diamond is the real
+            estimate. Expand for all four methods and the pooled placebo.
           </p>
         </div>
         <figure class="fig">
-          <svg id="placebo" viewBox="0 0 680 400" role="img"
-               aria-label="Backdated placebo distributions per estimator with the real estimates overlaid"></svg>
+          <svg id="placebo" viewBox="0 0 680 300" role="img"
+               aria-label="Backdated placebo noise distribution for the focused estimator"></svg>
         </figure>
       </section>
 
