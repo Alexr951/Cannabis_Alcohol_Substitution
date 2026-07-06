@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="styles.css?v=2" />
 </head>
 <body>
 <main class="wrap" id="app" aria-busy="true">
@@ -75,14 +75,30 @@
         <div class="panel-head">
           <h2>Standard error inflation</h2>
           <p class="panel-sub">
-            The test's <em>claimed</em> spread against the estimator's <em>true</em>
-            spread for <span id="se-est" class="est-name">the primary estimator</span>.
-            The claim widens with the effect while the truth does not.
+            The claimed standard error divided by the true sampling spread of
+            <span id="se-est" class="est-name">the primary estimator</span>.
+            This growing multiple is why the jackknife test never fires.
           </p>
         </div>
         <figure class="fig">
-          <svg id="se" viewBox="0 0 680 196" role="img"
-               aria-label="Claimed versus true standard error brackets"></svg>
+          <svg id="se" viewBox="0 0 680 230" role="img"
+               aria-label="Standard error inflation ratio with claimed and true spread bars"></svg>
+        </figure>
+      </section>
+
+      <section class="panel placebo-panel" aria-label="In-time placebo evidence">
+        <div class="panel-head">
+          <h2>The observed noise floor</h2>
+          <p class="panel-sub">
+            Backdated in-time placebos: fake effects estimated where no treatment
+            occurred. The method finds effects where there are none, of the same
+            size as the substitution we would hope to detect. Diamonds are the
+            real estimates, sitting inside that noise.
+          </p>
+        </div>
+        <figure class="fig">
+          <svg id="placebo" viewBox="0 0 680 400" role="img"
+               aria-label="Backdated placebo distributions per estimator with the real estimates overlaid"></svg>
         </figure>
       </section>
 
@@ -101,6 +117,7 @@
           <svg id="power" viewBox="0 0 520 432" role="img"
                aria-label="Power curves with the plausible-effect band and minimum detectable effects"></svg>
         </figure>
+        <p id="mde-callout" class="mde-callout"></p>
       </section>
 
       <section class="panel est-panel" aria-label="Estimators">
@@ -111,7 +128,7 @@
 
       <section class="panel read-panel" aria-label="Reading">
         <h3 class="mini-head">Notes</h3>
-        <p id="reading" class="reading"></p>
+        <p id="reading" class="reading" aria-live="polite"></p>
       </section>
 
     </div>
@@ -119,12 +136,21 @@
 
   <footer class="colophon">
     <p>
-      Every number replays <code>Results/csv/power_*.csv</code>, the same files
-      the paper's tables are built from. No estimation runs in the browser.
+      Every number replays <code>Results/csv/power_*.csv</code> and
+      <code>intime_placebo_*.csv</code>, the same files the paper's tables are
+      built from. No estimation runs in the browser.
       The plausible-effect band marks the low single digits, 1 to 4 percent. The
       paper treats this as the relevant small-effect case rather than a point
       estimate (Subbaraman 2016; the 12 percent scanner-data decline of Baggio,
       Chong and Kwon 2020 is the contrasting high end).
+    </p>
+    <p class="packages">
+      Partially-pooled ASCM (<code>augsynth</code>, jackknife) ·
+      Synthetic DiD (<code>synthdid</code>, placebo variance) ·
+      Generalized SC / IFE (<code>gsynth</code>, parametric bootstrap) ·
+      Matrix completion (<code>gsynth</code>, bootstrap) ·
+      Callaway–Sant'Anna (<code>did</code>, multiplier bootstrap) ·
+      <a href="https://github.com/Alexr951/Cannabis_Alcohol_Substitution">replication repository</a>
     </p>
     <p class="cite">
       Ronczewski, A. (2026). <em>Detecting Cannabis–Alcohol Substitution in
@@ -147,6 +173,6 @@
 </div>
 
 <script src="vendor/d3.v7.min.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>

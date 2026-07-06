@@ -1,8 +1,8 @@
 """Build the dashboard data file from the committed power-simulation results.
 
-Reads the six power_*.csv files in Results/csv/ and writes
-dashboard/public/data/power.json. The dashboard replays this file in the browser
-and does no estimation of its own.
+Reads the power_*.csv, intime_placebo_*.csv and primary-result files in
+Results/csv/ and writes dashboard/public/data/power.json. The dashboard replays
+this file in the browser and does no estimation of its own.
 
 Run from the repository root:  python dashboard/prep/build_dashboard_data.py
 """
@@ -20,6 +20,10 @@ OUT = ROOT / "dashboard" / "public" / "data" / "power.json"
 SOURCES = [
     "power_draws.csv", "power_results.csv", "power_ri_thresholds.csv",
     "power_jackknife_diag.csv", "power_mde.csv", "power_mde_by_estimator.csv",
+    "intime_placebo_single.csv", "intime_placebo_pooled2009.csv",
+    "intime_placebo_pooled2007.csv", "multisynth_overall.csv",
+    "sdid_primary.csv", "gsynth_primary.csv", "cs_twfe_primary.csv",
+    "state_scm_att.csv",
 ]
 
 # display labels
@@ -32,6 +36,24 @@ LABELS = {
 }
 ORDER = ["multisynth", "sdid", "gsynth_ife", "matrix_completion", "callaway_santanna"]
 PRIMARY = "multisynth"
+
+# Single-state backdated placebo methods (07_intime_placebo.R). The partially-
+# pooled ASCM has no single-unit analogue; the paper's Table 5 dagger note maps
+# it to the classic single-treated-unit SCM band.
+PLACEBO_LABELS = {
+    "classic_scm": "Classic SCM",
+    "ridge_ascm":  "Ridge ASCM",
+    "sdid":        "Synthetic DiD",
+    "gsynth_ife":  "Generalized SC (IFE)",
+}
+PLACEBO_ORDER = ["classic_scm", "ridge_ascm", "sdid", "gsynth_ife"]
+FOCUS_MAP = {
+    "multisynth": "classic_scm",   # dagger: single-unit special case of the augmented family
+    "sdid": "sdid",
+    "gsynth_ife": "gsynth_ife",
+    "matrix_completion": None,     # single-state backdated exercise not run
+    "callaway_santanna": None,
+}
 
 # Plausible-effect band, pinned to the paper (abstract, Section V, footnote 7).
 # The paper declines a point estimate and treats "the low single digits" as the
@@ -126,6 +148,7 @@ def main():
             "ri_thresh": sig(float(thresh[est])),
             "mde_ri": sig(float(mde.loc[est, "mde_ri"])) if not pd.isna(mde.loc[est, "mde_ri"]) else None,
             "mde_se": sig(float(mde.loc[est, "mde_se"])) if not pd.isna(mde.loc[est, "mde_se"]) else None,
+            "mde_ri_drinks": sig(float(mde.loc[est, "mde_ri_drinks"])) if not pd.isna(mde.loc[est, "mde_ri_drinks"]) else None,
             "deltas": {pct_key(d): cell(est, d) for d in deltas},
         }
 
@@ -142,22 +165,109 @@ def main():
         "mean_att": sig(float(rp.mean_att)),
     }
 
-    baseline = float(pd.read_csv(CSV / "power_mde.csv")["baseline_gal_ethanol_21"].iloc[0])
+    mde_all = pd.read_csv(CSV / "power_mde.csv").set_index("rule")
+    baseline = float(mde_all["baseline_gal_ethanol_21"].iloc[0])
+    mde_primary = float(mde_all.loc["ri_calibrated", "mde_delta"])
+    mde_drinks = float(mde_all.loc["ri_calibrated", "mde_drinks_per_month"])
+
+    # ---- In-time / backdated placebo section (Section IV of the paper) ----
+    single = pd.read_csv(CSV / "intime_placebo_single.csv")
+    pooled = {
+        "pooled2009": pd.read_csv(CSV / "intime_placebo_pooled2009.csv").set_index("estimator"),
+        "pooled2007": pd.read_csv(CSV / "intime_placebo_pooled2007.csv").set_index("estimator"),
+    }
+
+    placebo_single = {}
+    for m in PLACEBO_ORDER:
+        g = single[single.estimator == m].sort_values(["state", "fake_t0"])
+        vals = g.fake_att.astype(float)
+        placebo_single[m] = {
+            "label": PLACEBO_LABELS[m],
+            "n": int(len(g)),
+            "mean": sig(float(vals.mean())),
+            "sd": sig(float(vals.std(ddof=1))),
+            "values": [
+                {"state": s, "fake_t0": int(t), "att": sig(float(a))}
+                for s, t, a in zip(g.state, g.fake_t0, vals)
+            ],
+        }
+        # sanity windows from the paper (validate, do not hardcode):
+        # fake effects center near -0.9%, single-state SDs roughly 2.3-3.4 pp
+        assert -0.015 <= placebo_single[m]["mean"] <= -0.005, \
+            f"placebo mean out of paper range for {m}: {placebo_single[m]['mean']}"
+        assert 0.020 <= placebo_single[m]["sd"] <= 0.036, \
+            f"placebo sd out of paper range for {m}: {placebo_single[m]['sd']}"
+
+    placebo_pooled = {}
+    for key, df in pooled.items():
+        placebo_pooled[key] = {
+            est: {
+                "att": sig(float(df.loc[est, "att"])),
+                "se": sig(float(df.loc[est, "se"])),
+                "pct": sig(float(df.loc[est, "pct"])),
+                "t": sig(float(df.loc[est, "t_stat"])),
+            }
+            for est in df.index
+        }
+    # pooled fake-2009 effects sit in the -0.9% to -2.2% range (paper Table 5)
+    for est, c in placebo_pooled["pooled2009"].items():
+        assert -0.025 <= c["pct"] <= -0.005, \
+            f"pooled2009 pct out of paper range for {est}: {c['pct']}"
+    print("placebo self-check passed: single-state bands and pooled fake-2009 "
+          "match the paper's stated ranges")
+
+    # Real (non-placebo) estimates for overlay markers.
+    ms_overall = pd.read_csv(CSV / "multisynth_overall.csv").set_index("state")
+    sdid_prim = pd.read_csv(CSV / "sdid_primary.csv")
+    gs_prim = pd.read_csv(CSV / "gsynth_primary.csv").set_index("estimator")
+    cs_prim = pd.read_csv(CSV / "cs_twfe_primary.csv").set_index("estimator")
+    scm_att = pd.read_csv(CSV / "state_scm_att.csv")
+    clean_states = sorted(single.state.unique().tolist())
+
+    real_pooled = {
+        "multisynth": sig(float(ms_overall.loc["Average", "Estimate"])),
+        "sdid": sig(float(sdid_prim[sdid_prim.states == "Aggregate"].tau.iloc[0])),
+        "gsynth_ife": sig(float(gs_prim.loc["gsynth_ife", "att"])),
+        "matrix_completion": sig(float(gs_prim.loc["matrix_completion", "att"])),
+        "callaway_santanna": sig(float(cs_prim.loc["callaway_santanna", "att"])),
+        "twfe": sig(float(cs_prim.loc["twfe", "att"])),
+    }
+    real_states = {}
+    for m in ("classic_scm", "ridge_ascm"):
+        g = scm_att[(scm_att.estimator == m) & scm_att.state.isin(clean_states)]
+        real_states[m] = [
+            {"state": s, "att": sig(float(a))} for s, a in zip(g.state, g.att)
+        ]
+
+    placebo = {
+        "single_order": PLACEBO_ORDER,
+        "single": placebo_single,
+        "pooled2009": placebo_pooled["pooled2009"],
+        "pooled2007": placebo_pooled["pooled2007"],
+        "real": {"pooled": real_pooled, "states": real_states},
+        "focus_map": FOCUS_MAP,
+        "note": ("Backdated in-time placebos: fake treatment effects estimated "
+                 "on pre-treatment data where no treatment occurred. ATT in log "
+                 "points; clean-fit states only."),
+    }
 
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "meta": {
             "seed": 20260524,
             "deltas": deltas,
             "primary": PRIMARY,
             "estimator_order": ORDER,
             "baseline_gal_ethanol_21": baseline,
+            "mde_delta_primary": sig(mde_primary),
+            "mde_drinks_per_month": sig(mde_drinks),
             "sources": SOURCES,
             "note": "Every value traces to a committed file in Results/csv/.",
         },
         "plausible_band": PLAUSIBLE_BAND,
         "estimators": estimators,
         "phased": phased,
+        "placebo": placebo,
     }
 
     OUT.parent.mkdir(parents=True, exist_ok=True)

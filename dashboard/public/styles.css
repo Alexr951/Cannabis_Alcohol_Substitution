@@ -164,6 +164,7 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
   transition: background .15s ease, border-color .15s ease;
 }
 .est-row:hover { background: rgba(28,27,25,.035); }
+.est-row:focus-visible { outline: 2px solid rgba(140,58,46,.4); outline-offset: 2px; }
 .est-row.focus { background: rgba(140,58,46,.06); border-color: rgba(140,58,46,.25); }
 .est-check {
   width: 15px; height: 15px; flex: none; border-radius: 3px;
@@ -203,7 +204,11 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
 .lg-live { background: var(--calibrated); opacity: .55; }
 .lg-null { background: var(--ink-faint); opacity: .35; }
 .lg-cal  { background: var(--calibrated); opacity: .14; border: 1px dashed rgba(140,58,46,.55); }
-.lg-jack { background: var(--jackknife); opacity: .2; border: 1px dashed rgba(107,123,140,.7); }
+.lg-jack {
+  background: repeating-linear-gradient(45deg,
+    rgba(107,123,140,.55) 0 1px, rgba(107,123,140,.12) 1px 5px);
+  border: 1px dashed rgba(107,123,140,.7);
+}
 
 /* ---------- Expandable charts ---------- */
 .fig.expandable { position: relative; cursor: zoom-in; }
@@ -245,17 +250,36 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
 .cap-legend { display: flex; flex-wrap: wrap; gap: 8px 20px; padding-bottom: 6px; }
 .cap-note { font-size: 14.5px; color: var(--ink-soft); line-height: 1.55; margin: 8px 0 0; max-width: 60rem; }
 
+/* ---------- MDE human-units callout ---------- */
+.mde-callout {
+  margin: 12px 2px 0; padding-top: 10px; border-top: 1px solid var(--rule);
+  font-size: 13.5px; color: var(--ink-soft); line-height: 1.5;
+}
+.mde-callout strong { color: var(--ink); font-weight: 600; }
+
 /* ---------- Colophon ---------- */
 .colophon {
   margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--rule);
   font-size: 13px; color: var(--ink-faint); max-width: 52rem;
 }
 .colophon code { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+.colophon .packages { font-family: var(--mono); font-size: 11.5px; line-height: 1.7; }
+.colophon .packages a { color: var(--ink-soft); }
 .colophon .cite { margin-bottom: 0; }
 
 /* ---------- Responsive ---------- */
 @media (max-width: 900px) {
   .grid { grid-template-columns: minmax(0, 1fr); }
+}
+/* breakpoint: narrow phones (~380px). Panels are already a single column
+   from 900px down; this tightens fixed-pixel DOM elements that do not
+   scale with the SVG viewBoxes. */
+@media (max-width: 480px) {
+  /* .sl-lab shrink lives in the JS-injected slider CSS (app.js injectSliderCSS) */
+  .counters { grid-template-columns: 1fr; }
+  .panel { padding: 14px; }
+  .control { padding: 16px 14px 14px; }
+  .control-head label { font-size: 17px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .wrap, .counter-num.pulse { transition: none; animation: none; }

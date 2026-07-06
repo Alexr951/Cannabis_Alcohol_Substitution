@@ -30,7 +30,8 @@
   function pct1(frac) { return (frac * 100).toFixed(1) + "%"; }
   function dkDec(dk) { return (+dk) / 100; }
 
-  d3.json("data/power.json").then(function (data) {
+  // ?v matches schema_version so a stale cached copy is never replayed
+  d3.json("data/power.json?v=2").then(function (data) {
     DATA = data;
     DATA.meta.estimator_order.forEach(function (e) { state.active[e] = true; });
     var parts = (location.hash || "").replace("#", "").split("/");  // deep link: #-12 or #-8/hero
@@ -42,12 +43,14 @@
     buildEstList();
     buildLegend();
     heroInline = buildHeroEnv(d3.select("#hero"), 680, 408, false);
-    seInline = buildSEEnv(d3.select("#se"), 680, 196, false);
+    seInline = buildSEEnv(d3.select("#se"), 680, 230, false);
     powInline = buildPowerEnv(d3.select("#power"), 520, 432, false);
+    plaInline = buildPlaceboEnv(d3.select("#placebo"), 680, 400, false);
     initModal();
+    fillMdeCallout();
     update(true);
     document.getElementById("app").setAttribute("aria-busy", "false");
-    var TITLES = { hero: "Sampling distribution", se: "Standard error inflation", power: "Power curves" };
+    var TITLES = { hero: "Sampling distribution", se: "Standard error inflation", power: "Power curves", placebo: "The observed noise floor" };
     if (parts[1] && TITLES[parts[1]]) openModal(parts[1], TITLES[parts[1]]);
   });
 
@@ -123,6 +126,11 @@
       else { tail.className = "est-mde"; tail.textContent = e.mde_ri ? "MDE " + (Math.abs(e.mde_ri) * 100).toFixed(1) + "%" : ""; }
       li.appendChild(box); li.appendChild(sw); li.appendChild(lab); li.appendChild(tail);
       li.addEventListener("click", function () { setFocus(est); });
+      li.tabIndex = 0; li.setAttribute("role", "button");
+      li.setAttribute("aria-label", "Read " + e.label + " in the charts");
+      li.addEventListener("keydown", function (ev) {
+        if (ev.target === li && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); setFocus(est); }
+      });
       ul.appendChild(li);
     });
     syncEstList();
@@ -144,6 +152,7 @@
     drawHeroFrame(heroInline); drawHeroGhost(heroInline);
     drawHeroLive(heroInline, focusCell().att, focusCell().se_claimed, focusCell().mean_att);
     drawSE(seInline); drawPowerCurves(powInline); drawReading();
+    drawPlaceboStatic(plaInline); drawPlaceboMarker(plaInline);
   }
   function syncEstList() {
     d3.selectAll(".est-row").each(function () {
@@ -156,18 +165,38 @@
   function refreshHeroLabels() {
     document.getElementById("hero-est").textContent = DATA.estimators[state.focus].label;
     document.getElementById("se-est").textContent = DATA.estimators[state.focus].label;
+    updateChartAria();
+  }
+  // text alternatives: keep each chart's aria-label in step with the state
+  function updateChartAria() {
+    var c = focusCell(), est = DATA.estimators[state.focus].label, d = effI(dkDec(state.dk));
+    d3.select("#hero").attr("aria-label", "Sampling distribution for " + est + " at injected effect " + d +
+      ". The jackknife test rejects " + pct1(c.reject_se) + " of draws, the calibrated test " + pct1(c.reject_ri) + ".");
+    d3.select("#se").attr("aria-label", "Standard error inflation for " + est + " at " + d +
+      ": the claimed standard error is " + c.se_ratio.toFixed(1) + " times the true sampling spread.");
+    d3.select("#power").attr("aria-label", "Power curves. At a true effect of " + d + ", " + est +
+      " rejects " + pct1(c.reject_ri) + " of draws under the calibrated test.");
+    if (DATA.placebo) {
+      var m = DATA.placebo.focus_map[state.focus] || "classic_scm", s = DATA.placebo.single[m];
+      d3.select("#placebo").attr("aria-label", "Backdated placebo distributions. " + s.label +
+        " fake effects center at " + eff1(s.mean) + " with a spread of " + eff1(s.sd) +
+        " per estimate; the dashed marker shows a true effect of " + d + " against that noise floor.");
+    }
   }
 
   function update(first, fromIdx) {
     refreshHeroLabels();
     setCounters(focusCell(), !first);
-    drawReading(); drawSE(seInline); drawPowerMarker(powInline);
+    drawReading(); drawPowerMarker(powInline); drawPlaceboMarker(plaInline);
     if (first) {
+      drawSE(seInline);
       drawHeroFrame(heroInline); drawHeroGhost(heroInline);
       drawHeroLive(heroInline, focusCell().att, focusCell().se_claimed, focusCell().mean_att);
       drawPowerStatic(powInline); drawPowerCurves(powInline); drawPowerMarker(powInline);
+      drawPlaceboStatic(plaInline); drawPlaceboMarker(plaInline);
     } else {
       morphHero(heroInline, DKEYS[fromIdx], state.dk);
+      morphSE(seInline, DKEYS[fromIdx], state.dk);
     }
   }
   function setCounters(c, pulse) {
@@ -217,9 +246,15 @@
     env.y = d3.scaleLinear().domain([0, ymax * 1.10]).range([env.ph, 0]);
     var cid = "cap" + (clipSeq++);
     env.clip = cid;
+    var defs = svg.append("defs");
     // clip used to paint the share of the cloud past the calibrated threshold
-    svg.append("defs").append("clipPath").attr("id", cid).append("rect")
+    defs.append("clipPath").attr("id", cid).append("rect")
       .attr("x", 0).attr("y", -6).attr("width", env.x(-DATA.estimators[state.focus].ri_thresh)).attr("height", env.ph + 6);
+    // diagonal hatch so the jackknife region reads without color
+    var pid = "hatch" + (clipSeq++);
+    env.hatch = pid;
+    defs.append("pattern").attr("id", pid).attr("width", 6).attr("height", 6).attr("patternUnits", "userSpaceOnUse")
+      .append("path").attr("d", "M0,6 l6,-6").attr("stroke", C.jack).attr("stroke-width", 1).attr("opacity", 0.35);
     var root = svg.append("g").attr("transform", "translate(" + M.l + "," + M.t + ")");
     env.gFrame = root.append("g");
     env.gGhost = root.append("g");
@@ -248,6 +283,8 @@
     gax.select(".domain").remove();
     g.append("text").attr("class", "ax-label").attr("x", env.pw).attr("y", env.ph + 40)
       .attr("text-anchor", "end").style("font-size", fs + "px").text("estimated effect (%)");
+    g.append("text").attr("x", env.x(-thr) - 4).attr("y", env.ph + 52).attr("text-anchor", "end")
+      .attr("class", "ax-note").style("font-size", fs + "px").attr("fill", C.cal).text("calibrated threshold");
   }
   function drawHeroGhost(env) {
     var g = env.gGhost; g.selectAll("*").remove();
@@ -263,11 +300,13 @@
     [[xL, env.x(-jb)], [env.x(jb), xR]].forEach(function (s) {     // jackknife region moves with δ
       g.append("rect").attr("x", s[0]).attr("y", -6).attr("width", Math.max(0, s[1] - s[0])).attr("height", env.ph + 6)
         .attr("fill", C.jack).attr("opacity", 0.12);
+      g.append("rect").attr("x", s[0]).attr("y", -6).attr("width", Math.max(0, s[1] - s[0])).attr("height", env.ph + 6)
+        .attr("fill", "url(#" + env.hatch + ")");
     });
     [-jb, jb].forEach(function (t) {
       if (env.x(t) < xL - 2 || env.x(t) > xR + 2) return;
       g.append("line").attr("x1", env.x(t)).attr("x2", env.x(t)).attr("y1", -6).attr("y2", env.ph)
-        .attr("stroke", C.jack).attr("stroke-width", 1.2).attr("stroke-dasharray", "4 3").attr("opacity", 0.8);
+        .attr("stroke", C.jack).attr("stroke-width", 1.2).attr("stroke-dasharray", "7 3").attr("opacity", 0.8);
     });
     var dens = kde(att, env.bw, env.xs);
     var area = d3.area().x(function (d) { return env.x(d[0]); }).y0(env.ph).y1(function (d) { return env.y(d[1]); }).curve(d3.curveBasis);
@@ -307,45 +346,66 @@
     });
   }
 
-  // SE panel
+  // SE panel: the inflation ratio is the hero, the spread bars support it
   var seInline = null;
   function buildSEEnv(svg, W, H, detail) {
     svg.selectAll("*").remove();
-    var M = { t: 16, r: detail ? 170 : 150, b: 14, l: 22 };
+    var M = { t: 10, r: 18, b: 14, l: 22 };
     var env = { svg: svg, W: W, H: H, M: M, detail: detail };
     env.pw = W - M.l - M.r; env.ph = H - M.t - M.b;
     env.x = d3.scaleLinear().range([0, env.pw]);
     env.g = svg.append("g").attr("transform", "translate(" + M.l + "," + M.t + ")");
     return env;
   }
-  function drawSE(env) {
+  function drawSE(env, c) {
     var g = env.g; g.selectAll("*").remove();
-    var c = focusCell(), maxC = c.se_true;
+    c = c || focusCell();
+    var maxC = c.se_true;
     DKEYS.forEach(function (dk) { maxC = Math.max(maxC, cell(state.focus, dk).se_claimed); });
     env.x.domain([0, maxC * 1.04]);
-    var fs = env.detail ? 13 : 12, sub = env.detail ? 11 : 10, barH = env.detail ? 20 : 17;
+    var fs = env.detail ? 13 : 12, sub = env.detail ? 11 : 10, barH = env.detail ? 20 : 16;
+    var numFS = env.detail ? 84 : 66, numY = numFS * 0.82;
+    var word = c.se_ratio > 1.05 ? "too wide" : (c.se_ratio < 0.95 ? "too narrow" : "about right");
+    g.append("text").attr("x", 0).attr("y", numY)
+      .attr("class", "ax-label").style("font-size", numFS + "px").style("font-weight", "500")
+      .attr("fill", C.jack).text(c.se_ratio.toFixed(1) + "×");
+    g.append("text").attr("x", env.pw).attr("y", numY - numFS * 0.34).attr("text-anchor", "end")
+      .attr("class", "ax-note").style("font-size", (sub + 2) + "px").attr("fill", C.inkSoft)
+      .text("claimed SE ÷ true sampling spread");
+    g.append("text").attr("x", env.pw).attr("y", numY - numFS * 0.34 + 18).attr("text-anchor", "end")
+      .attr("class", "ax-note").style("font-size", (sub + 2) + "px").attr("fill", C.jack).text(word);
     var claimedSub = state.focus === "multisynth" ? "mean jackknife standard error" : "mean reported standard error";
     var rows = [
-      { lab: "claimed", sub: claimedSub, val: c.se_claimed, col: C.jack, top: env.ph * 0.04 },
-      { lab: "true", sub: "standard deviation of the estimates", val: c.se_true, col: C.cloud, top: env.ph * 0.54 }
+      { lab: "claimed", sub: claimedSub, val: c.se_claimed, col: C.jack, top: numFS + 12 },
+      { lab: "true", sub: "standard deviation of the estimates", val: c.se_true, col: C.cloud, top: numFS + 12 + (env.detail ? 62 : 52) }
     ];
-    g.append("line").attr("x1", env.x(c.se_true)).attr("x2", env.x(c.se_true)).attr("y1", env.ph * 0.04)
-      .attr("y2", env.ph * 0.54 + barH + 18).attr("stroke", C.cloud).attr("stroke-width", 1).attr("stroke-dasharray", "2 3").attr("opacity", 0.45);
+    g.append("line").attr("x1", env.x(c.se_true)).attr("x2", env.x(c.se_true)).attr("y1", rows[0].top)
+      .attr("y2", rows[1].top + barH + 18).attr("stroke", C.cloud).attr("stroke-width", 1).attr("stroke-dasharray", "2 3").attr("opacity", 0.45);
     rows.forEach(function (r) {
       g.append("text").attr("x", 0).attr("y", r.top + 11).attr("class", "ax-label").style("font-size", fs + "px").attr("fill", C.ink).text(r.lab);
       g.append("text").attr("x", 64).attr("y", r.top + 11).attr("class", "ax-note").style("font-size", sub + "px").attr("fill", C.inkFaint).text(r.sub);
-      var by = r.top + 20;
+      var by = r.top + 16;
       g.append("rect").attr("x", 0).attr("y", by).attr("width", Math.max(1, env.x(r.val))).attr("height", barH).attr("rx", 2)
         .attr("fill", r.col).attr("opacity", r.lab === "claimed" ? 0.32 : 0.85);
       g.append("rect").attr("x", env.x(r.val) - 1.5).attr("y", by - 3).attr("width", 2.5).attr("height", barH + 6).attr("fill", r.col);
-      g.append("text").attr("x", env.x(r.val) + 8).attr("y", by + barH - 4).attr("class", "ax-label").style("font-size", (fs - 0.5) + "px").attr("fill", r.col).text(r.val.toFixed(4));
+      g.append("text").attr("x", env.x(r.val) + 8).attr("y", by + barH - 3).attr("class", "ax-label").style("font-size", (fs - 0.5) + "px").attr("fill", r.col).text(r.val.toFixed(4));
     });
-    var word = c.se_ratio > 1.05 ? "too wide" : (c.se_ratio < 0.95 ? "too narrow" : "about right");
-    var rx = env.pw + env.M.r - 16, ry = env.detail ? 42 : 36;
-    g.append("text").attr("x", rx).attr("y", ry).attr("text-anchor", "end")
-      .attr("class", "ax-label").style("font-size", (env.detail ? 40 : 34) + "px").attr("fill", C.jack).text(c.se_ratio.toFixed(1) + "×");
-    g.append("text").attr("x", rx).attr("y", ry + (env.detail ? 20 : 16)).attr("text-anchor", "end")
-      .attr("class", "ax-note").style("font-size", sub + "px").attr("fill", C.inkFaint).text(word);
+  }
+  function morphSE(env, fromDk, toDk) {
+    var a0 = cell(state.focus, fromDk), a1 = cell(state.focus, toDk);
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) { drawSE(env, a1); return; }
+    var dur = 520;
+    if (env.timer) env.timer.stop();
+    env.timer = d3.timer(function (el) {
+      var k = Math.min(1, el / dur), e = d3.easeCubicOut(k);
+      drawSE(env, {
+        se_claimed: a0.se_claimed + (a1.se_claimed - a0.se_claimed) * e,
+        se_true: a1.se_true,
+        se_ratio: a0.se_ratio + (a1.se_ratio - a0.se_ratio) * e
+      });
+      if (k >= 1) { env.timer.stop(); drawSE(env, a1); }
+    });
   }
 
   // power curve
@@ -414,6 +474,122 @@
     g.append("circle").attr("cx", mx).attr("cy", -2).attr("r", 3).attr("fill", C.ink);
   }
 
+  // human-units translation of the detection threshold (values from power.json meta)
+  function fillMdeCallout() {
+    var m = DATA.meta, el = document.getElementById("mde-callout");
+    if (!el || m.mde_delta_primary == null) return;
+    var bl = Math.abs(DATA.plausible_band.left * 100), br = Math.abs(DATA.plausible_band.right * 100);
+    el.innerHTML = "The primary estimator's smallest detectable effect is <strong>" +
+      Math.abs(m.mde_delta_primary * 100).toFixed(1) + "%</strong> of per-capita ethanol, roughly <strong>" +
+      m.mde_drinks_per_month.toFixed(1) + " standard drinks per adult per month</strong> at the " +
+      m.baseline_gal_ethanol_21.toFixed(2) + "-gallon baseline. Plausible substitution, " +
+      bl + " to " + br + " percent, sits well below it.";
+  }
+
+  // placebo panel: the observed noise floor (Section IV in-time placebos)
+  var plaInline = null;
+  function buildPlaceboEnv(svg, W, H, detail) {
+    svg.selectAll("*").remove();
+    var M = { t: 8, r: 18, b: 48, l: 22 };
+    var env = { svg: svg, W: W, H: H, M: M, detail: detail };
+    env.pw = W - M.l - M.r; env.ph = H - M.t - M.b;
+    env.x = d3.scaleLinear().range([0, env.pw]);
+    var root = svg.append("g").attr("transform", "translate(" + M.l + "," + M.t + ")");
+    env.gStatic = root.append("g");
+    env.gMarker = root.append("g");
+    return env;
+  }
+  function placeboDiamond(g, x, y, r, fill) {
+    g.append("path").attr("d", "M" + x + "," + (y - r) + "L" + (x + r) + "," + y + "L" + x + "," + (y + r) + "L" + (x - r) + "," + y + "Z")
+      .attr("fill", fill).attr("stroke", C.panel).attr("stroke-width", 1);
+  }
+  function drawPlaceboStatic(env) {
+    var g = env.gStatic; g.selectAll("*").remove();
+    var P = DATA.placebo; if (!P) return;
+    var fs = env.detail ? 12 : 11, sub = env.detail ? 11 : 10;
+    // domain from the committed values themselves plus the delta grid
+    var lo = -0.13, hi = 0.02;
+    P.single_order.forEach(function (m) {
+      P.single[m].values.forEach(function (v) { lo = Math.min(lo, v.att); hi = Math.max(hi, v.att); });
+    });
+    Object.keys(P.real.states).forEach(function (m) {
+      P.real.states[m].forEach(function (r) { lo = Math.min(lo, r.att); hi = Math.max(hi, r.att); });
+    });
+    DATA.meta.estimator_order.forEach(function (est) {
+      if (P.real.pooled[est] != null) { lo = Math.min(lo, P.real.pooled[est]); hi = Math.max(hi, P.real.pooled[est]); }
+      if (P.pooled2009[est]) { lo = Math.min(lo, P.pooled2009[est].att); hi = Math.max(hi, P.pooled2009[est].att); }
+    });
+    env.x.domain([lo - 0.01, hi + 0.01]);
+
+    var rows = P.single_order, rowH = env.ph / (rows.length + 1);
+    var focusMethod = P.focus_map[state.focus];
+    // zero line spans the panel
+    g.append("line").attr("x1", env.x(0)).attr("x2", env.x(0)).attr("y1", 0).attr("y2", env.ph)
+      .attr("stroke", C.rule).attr("stroke-width", 1);
+
+    rows.forEach(function (m, i) {
+      var s = P.single[m], y0 = i * rowH, yc = y0 + rowH * 0.62, isFocus = m === focusMethod;
+      g.append("text").attr("x", 0).attr("y", y0 + 13).attr("class", "ax-label").style("font-size", fs + "px")
+        .attr("fill", isFocus ? C.ink : C.inkFaint).style("font-weight", isFocus ? "600" : "400")
+        .text(s.label + "  ·  mean " + eff1(s.mean) + ", sd " + (Math.abs(s.sd) * 100).toFixed(1) + "pp");
+      g.append("rect").attr("x", env.x(s.mean - 2 * s.sd)).attr("y", yc - rowH * 0.16)
+        .attr("width", env.x(s.mean + 2 * s.sd) - env.x(s.mean - 2 * s.sd)).attr("height", rowH * 0.32).attr("rx", 2)
+        .attr("fill", C.jack).attr("opacity", isFocus ? 0.18 : 0.08);
+      g.append("line").attr("x1", env.x(s.mean)).attr("x2", env.x(s.mean)).attr("y1", yc - rowH * 0.2).attr("y2", yc + rowH * 0.2)
+        .attr("stroke", C.ink).attr("stroke-width", 1.4).attr("opacity", isFocus ? 0.9 : 0.5);
+      s.values.forEach(function (v, j) {
+        var jit = (((j * 7919) % 17) - 8) / 8 * rowH * 0.11;   // deterministic jitter
+        g.append("circle").attr("cx", env.x(v.att)).attr("cy", yc + jit).attr("r", env.detail ? 2.6 : 2.1)
+          .attr("fill", C.inkFaint).attr("opacity", isFocus ? 0.8 : 0.45);
+      });
+      var reals = P.real.states[m]
+        ? P.real.states[m].map(function (r) { return r.att; })
+        : (P.real.pooled[m] != null ? [P.real.pooled[m]] : []);
+      reals.forEach(function (a) { placeboDiamond(g, env.x(a), yc, env.detail ? 6 : 5, C.cal); });
+    });
+
+    // pooled fake-2009 strip
+    var yP = rows.length * rowH, ycP = yP + rowH * 0.62;
+    g.append("text").attr("x", 0).attr("y", yP + 13).attr("class", "ax-label").style("font-size", fs + "px")
+      .attr("fill", C.inkSoft).text("Pooled fake-2009, all five estimators");
+    DATA.meta.estimator_order.forEach(function (est) {
+      var p = P.pooled2009[est]; if (!p) return;
+      var isFocus = est === state.focus;
+      g.append("circle").attr("cx", env.x(p.att)).attr("cy", ycP).attr("r", isFocus ? (env.detail ? 6 : 5) : (env.detail ? 4 : 3.5))
+        .attr("fill", SWATCH[est]).attr("stroke", C.panel).attr("stroke-width", 1)
+        .attr("opacity", isFocus ? 1 : 0.75);
+    });
+
+    // axis
+    var ax = d3.axisBottom(env.x).tickValues([-0.12, -0.08, -0.04, 0, 0.04, 0.08])
+      .tickFormat(function (d) { return (d < 0 ? "−" : "") + Math.abs(Math.round(d * 100)); }).tickSize(4);
+    var gx = g.append("g").attr("transform", "translate(0," + env.ph + ")").call(ax);
+    gx.selectAll("text").attr("class", "tick").style("font-size", fs + "px");
+    gx.select(".domain").attr("stroke", C.rule);
+    g.append("text").attr("class", "ax-label").attr("x", env.pw).attr("y", env.ph + 36)
+      .attr("text-anchor", "end").style("font-size", fs + "px").text("fake effect (%)");
+    if (!focusMethod) {
+      g.append("text").attr("x", 0).attr("y", env.ph + 36).attr("class", "ax-note").style("font-size", sub + "px")
+        .attr("fill", C.inkFaint)
+        .text("single-state backdating was not run for " + DATA.estimators[state.focus].short + "; its pooled marker is highlighted");
+    } else if (state.focus === "multisynth") {
+      g.append("text").attr("x", 0).attr("y", env.ph + 36).attr("class", "ax-note").style("font-size", sub + "px")
+        .attr("fill", C.inkFaint)
+        .text("classic SCM is the single-unit analogue of the partially-pooled ASCM");
+    }
+  }
+  function drawPlaceboMarker(env) {
+    var g = env.gMarker; g.selectAll("*").remove();
+    if (!DATA.placebo) return;
+    var v = dkDec(state.dk), mx = env.x(v);
+    g.append("line").attr("x1", mx).attr("x2", mx).attr("y1", 2).attr("y2", env.ph)
+      .attr("stroke", C.ink).attr("stroke-width", 1.2).attr("stroke-dasharray", "5 4").attr("opacity", 0.65);
+    var left = mx < env.pw * 0.5;
+    g.append("text").attr("x", mx + (left ? 6 : -6)).attr("y", env.ph - 5).attr("text-anchor", left ? "start" : "end")
+      .attr("class", "ax-note").style("font-size", (env.detail ? 11 : 10) + "px").attr("fill", C.ink)
+      .text("a true effect of " + effI(v));
+  }
+
   function drawReading() {
     var c = focusCell(), est = DATA.estimators[state.focus], el = document.getElementById("reading");
     if (state.dk === "0") {
@@ -435,7 +611,7 @@
     document.getElementById("modal-close").addEventListener("click", closeModal);
     modal.addEventListener("click", function (e) { if (e.target === modal) closeModal(); });
     document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !modal.hidden) closeModal(); });
-    [["hero", "Sampling distribution"], ["se", "Standard error inflation"], ["power", "Power curves"]].forEach(function (p) {
+    [["hero", "Sampling distribution"], ["se", "Standard error inflation"], ["power", "Power curves"], ["placebo", "The observed noise floor"]].forEach(function (p) {
       var fig = document.getElementById(p[0]).parentNode;
       fig.classList.add("expandable"); fig.setAttribute("role", "button"); fig.tabIndex = 0;
       fig.setAttribute("aria-label", "Expand " + p[1]);
@@ -458,8 +634,13 @@
       modalSvg.attr("viewBox", "0 0 900 300");
       drawSE(buildSEEnv(modalSvg, 900, 300, true));
       cap.appendChild(note(state.focus === "multisynth"
-        ? "The claimed spread is the mean jackknife standard error. The true spread is the standard deviation of the point estimates across draws. The jackknife runs several times too wide, so its test cannot reject."
-        : "The claimed spread is the estimator's mean reported standard error. The true spread is the standard deviation of the point estimates across draws. Here the reported error runs narrower than the truth, so the test over-rejects."));
+        ? "The ratio divides the mean jackknife standard error by the standard deviation of the point estimates across draws. The jackknife runs several times too wide and widens further with the effect, so its test cannot reject."
+        : "The ratio divides the estimator's mean reported standard error by the standard deviation of the point estimates across draws. A ratio below one means the reported error runs narrower than the truth, so the test over-rejects."));
+    } else if (kind === "placebo") {
+      modalSvg.attr("viewBox", "0 0 900 520");
+      var q = buildPlaceboEnv(modalSvg, 900, 520, true);
+      drawPlaceboStatic(q); drawPlaceboMarker(q);
+      cap.appendChild(note("Gray points are fake treatment effects estimated at every feasible backdated adoption year for the clean-fit states, using only pre-treatment data. Bands mark the mean and ±2 SD of each method's fake distribution; diamonds are the real estimates. The dashed line marks a true effect of the current δ: effects in the low single digits sit inside the noise the design produces when nothing happened."));
     } else {
       modalSvg.attr("viewBox", "0 0 760 520");
       var p = buildPowerEnv(modalSvg, 760, 520, true);
@@ -482,7 +663,8 @@
     DATA.meta.estimator_order.forEach(function (est) {
       var e = DATA.estimators[est], s = mk("span"); s.className = "lg-item";
       var sw = mk("span"); sw.className = "lg-sw"; sw.style.background = SWATCH[est]; sw.style.opacity = state.active[est] ? 1 : 0.3;
-      var tx = mk("span"); tx.textContent = e.label + (e.mde_ri ? " (MDE " + (Math.abs(e.mde_ri) * 100).toFixed(1) + "%)" : "");
+      var tx = mk("span"); tx.textContent = e.label + (e.mde_ri ? " (MDE " + (Math.abs(e.mde_ri) * 100).toFixed(1) + "%" +
+        (e.mde_ri_drinks ? " ≈ " + e.mde_ri_drinks.toFixed(1) + " drinks/mo" : "") + ")" : "");
       s.appendChild(sw); s.appendChild(tx); d.appendChild(s);
     });
     var s2 = mk("span"); s2.className = "lg-item";
@@ -502,7 +684,8 @@
       ".sl-fill{position:absolute;left:0;top:50%;height:3px;transform:translateY(-50%);background:" + C.cal + ";border-radius:2px;opacity:.55}" +
       ".sl-tick{position:absolute;top:50%;width:2px;height:10px;transform:translate(-50%,-50%);background:" + C.inkFaint + ";opacity:.5;border-radius:1px}" +
       ".sl-lab{position:absolute;top:calc(50% + 12px);transform:translateX(-50%);font-family:" + v("--mono") + ";font-size:11px;color:" + C.inkFaint + ";font-variant-numeric:tabular-nums}" +
-      ".thumb{position:absolute;top:50%;width:20px;height:20px;transform:translate(-50%,-50%);background:" + C.panel + ";border:2.5px solid " + C.cal + ";border-radius:50%;box-shadow:0 2px 6px -1px rgba(28,27,25,.35);pointer-events:none}";
+      ".thumb{position:absolute;top:50%;width:20px;height:20px;transform:translate(-50%,-50%);background:" + C.panel + ";border:2.5px solid " + C.cal + ";border-radius:50%;box-shadow:0 2px 6px -1px rgba(28,27,25,.35);pointer-events:none}" +
+      "@media (max-width:480px){.sl-lab{font-size:9px}}";   // breakpoint: narrow phones
     document.head.appendChild(s);
   }
   window.addEventListener("resize", function () {
