@@ -96,7 +96,10 @@ body {
 }
 
 /* slider built in JS as an SVG-free DOM track */
-.slider { position: relative; height: 46px; cursor: pointer; outline: none; user-select: none; }
+.slider {
+  position: relative; height: 46px; cursor: pointer; outline: none; user-select: none;
+  touch-action: none;   /* keep touch drags on the slider instead of scrolling the page */
+}
 .slider:focus-visible .thumb { box-shadow: 0 0 0 4px rgba(140,58,46,.22); }
 
 /* ---------- Layout grid ---------- */
@@ -269,7 +272,16 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
 
 /* ---------- Responsive ---------- */
 @media (max-width: 900px) {
+  /* dissolve the two columns so panels stack in one ordered column:
+     estimator picker right after the delta control, then the distribution */
   .grid { grid-template-columns: minmax(0, 1fr); }
+  .col-main, .col-side { display: contents; }
+  .est-panel     { order: 1; }
+  .hero-panel    { order: 2; }
+  .se-panel      { order: 3; }
+  .placebo-panel { order: 4; }
+  .power-panel   { order: 5; }
+  .read-panel    { order: 6; }
 }
 /* breakpoint: narrow phones (~380px). Panels are already a single column
    from 900px down; this tightens fixed-pixel DOM elements that do not

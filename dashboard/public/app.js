@@ -20,6 +20,8 @@
   };
 
   var DKEYS = ["0", "-2", "-5", "-8", "-12"];
+  // same query string as the CSS narrow-phone rules: one breakpoint source of truth
+  var NARROW_MQ = window.matchMedia("(max-width: 480px)");
   var state = { dk: "0", focus: "multisynth", active: {} };
   var DATA = null;
   var clipSeq = 0;
@@ -81,6 +83,7 @@
     slEl.addEventListener("pointerdown", function (e) { dragging = true; slEl.setPointerCapture(e.pointerId); pick(e.clientX); });
     slEl.addEventListener("pointermove", function (e) { if (dragging) pick(e.clientX); });
     slEl.addEventListener("pointerup", function () { dragging = false; });
+    slEl.addEventListener("pointercancel", function () { dragging = false; });
     slEl.addEventListener("keydown", function (e) {
       var i = DKEYS.indexOf(state.dk);
       if (e.key === "ArrowLeft" || e.key === "ArrowDown") { setDelta(DKEYS[Math.max(0, i - 1)]); e.preventDefault(); }
@@ -165,7 +168,21 @@
   function refreshHeroLabels() {
     document.getElementById("hero-est").textContent = DATA.estimators[state.focus].label;
     document.getElementById("se-est").textContent = DATA.estimators[state.focus].label;
+    document.getElementById("se-verdict").textContent = seVerdict();
     updateChartAria();
+  }
+  // One sentence on what the SE ratio means for the focused estimator's test.
+  // Branches on the same delta=0 size flag as the jackknife-counter caption, then
+  // on the panel's existing 1.05 qualifier bound, so the three never disagree.
+  function seVerdict() {
+    var c0 = cell(state.focus, "0");
+    if (c0.reject_se > OVERSIZE) {
+      return "The claimed error understates the true spread, so the test rejects too often: its nominal 5 percent size is really " + pct1(c0.reject_se) + ".";
+    }
+    if (c0.se_ratio > 1.05) {
+      return "This multiple grows with the effect, which is why the jackknife test rarely fires.";
+    }
+    return "The claimed error runs narrower than the true spread, but the test still holds close to its nominal 5 percent size.";
   }
   // text alternatives: keep each chart's aria-label in step with the state
   function updateChartAria() {
@@ -180,7 +197,8 @@
       var m = DATA.placebo.focus_map[state.focus] || "classic_scm", s = DATA.placebo.single[m];
       d3.select("#placebo").attr("aria-label", "Backdated placebo distributions. " + s.label +
         " fake effects center at " + eff1(s.mean) + " with a spread of " + eff1(s.sd) +
-        " per estimate; the dashed marker shows a true effect of " + d + " against that noise floor.");
+        " per estimate; a true effect of " + d +
+        (dkDec(state.dk) >= placeboEdge() ? " sits inside this noise floor." : " clears this noise floor."));
     }
   }
 
@@ -199,9 +217,14 @@
       morphSE(seInline, DKEYS[fromIdx], state.dk);
     }
   }
+  // An estimator whose SE test rejects more than this at delta=0 is an over-rejector
+  // (1.5x the nominal 5% size, clear of sampling noise at 200 draws).
+  var OVERSIZE = 0.075;
   function setCounters(c, pulse) {
     var j = document.getElementById("c-jack"), k = document.getElementById("c-cal");
     j.textContent = pct1(c.reject_se); k.textContent = pct1(c.reject_ri);
+    document.getElementById("c-jack-cap").textContent =
+      cell(state.focus, "0").reject_se > OVERSIZE ? "over-rejects: SE too narrow" : "as used in applied work";
     if (pulse) { reflow(j); reflow(k); j.classList.add("pulse"); k.classList.add("pulse"); }
   }
 
@@ -233,8 +256,11 @@
   var heroInline = null;
   function buildHeroEnv(svg, W, H, detail) {
     svg.selectAll("*").remove();
-    var M = { t: 16, r: 18, b: detail ? 74 : 60, l: 18 };
-    var env = { svg: svg, W: W, H: H, M: M, detail: detail };
+    // narrow mode: the svg scales down ~0.47x on phones, so below-axis text gets
+    // LARGER user-unit fonts plus a taller ladder to stay legible after scaling
+    var narrow = NARROW_MQ.matches;
+    var M = { t: 16, r: 18, b: detail ? (narrow ? 128 : 96) : (narrow ? 124 : 82), l: 18 };
+    var env = { svg: svg, W: W, H: H, M: M, detail: detail, narrow: narrow };
     env.pw = W - M.l - M.r; env.ph = H - M.t - M.b;
     env.x = d3.scaleLinear().domain([-0.27, 0.10]).range([0, env.pw]);
     var fc = focusCell(), n = DATA.estimators[state.focus].n_draws;
@@ -265,7 +291,7 @@
   function drawHeroFrame(env) {
     var g = env.gFrame; g.selectAll("*").remove();
     var thr = DATA.estimators[state.focus].ri_thresh;
-    var xL = 0, xR = env.pw, fs = env.detail ? 12 : 11;
+    var xL = 0, xR = env.pw, fs = env.narrow ? 16 : (env.detail ? 12 : 11);
     [[xL, env.x(-thr)], [env.x(thr), xR]].forEach(function (s) {
       g.append("rect").attr("x", s[0]).attr("y", -6).attr("width", Math.max(0, s[1] - s[0])).attr("height", env.ph + 6)
         .attr("fill", C.cal).attr("opacity", 0.06);
@@ -281,10 +307,25 @@
     var gax = g.append("g").attr("transform", "translate(0," + env.ph + ")").call(ax);
     gax.selectAll("text").attr("class", "tick").style("font-size", fs + "px");
     gax.select(".domain").remove();
-    g.append("text").attr("class", "ax-label").attr("x", env.pw).attr("y", env.ph + 40)
-      .attr("text-anchor", "end").style("font-size", fs + "px").text("estimated effect (%)");
-    g.append("text").attr("x", env.x(-thr) - 4).attr("y", env.ph + 52).attr("text-anchor", "end")
-      .attr("class", "ax-note").style("font-size", fs + "px").attr("fill", C.cal).text("calibrated threshold");
+    // Row D: axis title on its own dedicated row, centered, below all callouts
+    g.append("text").attr("class", "ax-label").attr("x", env.pw / 2)
+      .attr("y", env.ph + (env.narrow ? 112 : (env.detail ? 76 : 70)))
+      .attr("text-anchor", "middle").style("font-size", fs + "px").text("estimated effect (%)");
+    // Row C: calibrated-threshold label centered on its own line
+    thresholdLabel(g, thr, env.ph + (env.narrow ? 88 : (env.detail ? 60 : 56)), "calibrated threshold", C.cal, fs, env);
+  }
+  // Centers a threshold label on the right-side line of a ± pair (left line if the
+  // right one is off-plot), clamps it inside the plot, and drops a short leader tick.
+  function thresholdLabel(g, t, y, txt, color, fs, env) {
+    var xRt = env.x(t), xLt = env.x(-t);
+    var lineX = (xRt >= 0 && xRt <= env.pw) ? xRt : xLt;
+    if (lineX < 0 || lineX > env.pw) return;   // both lines outside the plot
+    g.append("line").attr("x1", lineX).attr("x2", lineX).attr("y1", env.ph).attr("y2", env.ph + 7)
+      .attr("stroke", color).attr("stroke-width", 1.2);
+    var el = g.append("text").attr("x", lineX).attr("y", y).attr("text-anchor", "middle")
+      .attr("class", "ax-note").style("font-size", fs + "px").attr("fill", color).text(txt);
+    var w = el.node().getComputedTextLength();
+    el.attr("x", Math.min(Math.max(lineX, w / 2 + 2), env.pw - w / 2 - 2));
   }
   function drawHeroGhost(env) {
     var g = env.gGhost; g.selectAll("*").remove();
@@ -296,7 +337,7 @@
   function drawHeroLive(env, att, jackSE, meanv, labelDk) {
     var g = env.gDyn, ga = env.gAxis; g.selectAll("*").remove(); ga.selectAll("*").remove();
     var thr = DATA.estimators[state.focus].ri_thresh, xL = 0, xR = env.pw;
-    var jb = 1.96 * jackSE, fs = env.detail ? 11.5 : 10.5;
+    var jb = 1.96 * jackSE, fs = env.narrow ? 16 : (env.detail ? 11.5 : 10.5);
     [[xL, env.x(-jb)], [env.x(jb), xR]].forEach(function (s) {     // jackknife region moves with δ
       g.append("rect").attr("x", s[0]).attr("y", -6).attr("width", Math.max(0, s[1] - s[0])).attr("height", env.ph + 6)
         .attr("fill", C.jack).attr("opacity", 0.12);
@@ -324,13 +365,12 @@
     ga.append("line").attr("x1", xm).attr("x2", xm).attr("y1", env.ph).attr("y2", env.ph + 7).attr("stroke", C.cal).attr("stroke-width", 1.4);
     var mid = (xi + xm) / 2, anchor = mid > env.pw - 120 ? "end" : (mid < 120 ? "start" : "middle");
     var lx = anchor === "end" ? Math.max(xi, xm) : (anchor === "start" ? Math.min(xi, xm) : mid);
-    ga.append("text").attr("x", lx).attr("y", env.ph + 25).attr("text-anchor", anchor)
+    ga.append("text").attr("x", lx).attr("y", env.ph + (env.narrow ? 40 : (env.detail ? 31 : 29))).attr("text-anchor", anchor)
       .attr("class", "ax-note").style("font-size", fs + "px").attr("fill", C.ink)
-      .text("injected " + effI(inj) + ", recovered " + eff1(meanv));
-    var jx = Math.max(xL + 1, env.x(-jb));
-    ga.append("line").attr("x1", jx).attr("x2", jx).attr("y1", env.ph).attr("y2", env.ph + 7).attr("stroke", C.jack).attr("stroke-width", 1.2);
-    ga.append("text").attr("x", jx + 4).attr("y", env.ph + 40).attr("text-anchor", "start")
-      .attr("class", "ax-note").style("font-size", fs + "px").attr("fill", C.jack).text("jackknife threshold");
+      .text(env.narrow ? ("inj " + effI(inj) + ", rec " + eff1(meanv))
+                       : ("injected " + effI(inj) + ", recovered " + eff1(meanv)));
+    // Row B: jackknife-threshold label centered on its own line
+    thresholdLabel(ga, jb, env.ph + (env.narrow ? 64 : (env.detail ? 46 : 43)), "jackknife threshold", C.jack, fs, env);
   }
   function morphHero(env, fromDk, toDk) {
     var est = state.focus, a0 = cell(est, fromDk), a1 = cell(est, toDk);
@@ -445,8 +485,9 @@
     g.append("line").attr("x1", 0).attr("x2", env.pw).attr("y1", env.y(0.8)).attr("y2", env.y(0.8)).attr("stroke", C.inkFaint).attr("stroke-width", 1).attr("stroke-dasharray", "3 3");
     g.append("text").attr("x", env.pw - 2).attr("y", env.y(0.8) - 5).attr("text-anchor", "end").attr("class", "ax-note").style("font-size", "10px").text("80% power");
   }
-  function pcurve(env, rates) {
-    return d3.line().x(function (d) { return env.x(Math.abs(+d[0]) / 100); }).y(function (d) { return env.y(d[1]); }).curve(d3.curveMonotoneX)(DKEYS.map(function (k) { return [k, rates(k)]; }));
+  function pcurve(env, rates, floorPad) {
+    var pad = floorPad || 0;   // lifts floor-hugging curves off the axis line for legibility
+    return d3.line().x(function (d) { return env.x(Math.abs(+d[0]) / 100); }).y(function (d) { return Math.min(env.y(d[1]), env.ph - pad); }).curve(d3.curveMonotoneX)(DKEYS.map(function (k) { return [k, rates(k)]; }));
   }
   function drawPowerCurves(env) {
     var g = env.gCurves; g.selectAll("*").remove();
@@ -458,12 +499,20 @@
       if (foc) DKEYS.forEach(function (k) {
         g.append("circle").attr("cx", env.x(Math.abs(+k) / 100)).attr("cy", env.y(cell(est, k).reject_ri)).attr("r", 3).attr("fill", SWATCH[est]);
       });
+      // MDE tick for the focused curve only; the estimator list and modal legend carry the rest
       var mde = DATA.estimators[est].mde_ri;
-      if (mde) g.append("line").attr("x1", env.x(Math.abs(mde))).attr("x2", env.x(Math.abs(mde))).attr("y1", env.y(0.8) - 5).attr("y2", env.y(0.8) + 5)
-        .attr("stroke", SWATCH[est]).attr("stroke-width", foc ? 2 : 1.2).attr("opacity", foc ? 1 : 0.55);
+      if (mde && foc) {
+        var mx = env.x(Math.abs(mde));
+        g.append("line").attr("x1", mx).attr("x2", mx).attr("y1", env.y(0.8) - 7).attr("y2", env.y(0.8) + 7)
+          .attr("stroke", SWATCH[est]).attr("stroke-width", 2);
+        g.append("text").attr("x", mx - 5).attr("y", env.y(0.8) - 7).attr("text-anchor", "end")
+          .attr("class", "ax-note").style("font-size", "9.5px").attr("fill", SWATCH[est])
+          .text("MDE " + (Math.abs(mde) * 100).toFixed(1) + "%");
+      }
     });
     // the primary estimator's jackknife rule sits flat on the floor at every δ
-    g.append("path").attr("d", pcurve(env, function (k) { return cell("multisynth", k).reject_se; }))
+    // (drawn 2px above the axis so it reads as its own line, not the axis)
+    g.append("path").attr("d", pcurve(env, function (k) { return cell("multisynth", k).reject_se; }, 2))
       .attr("fill", "none").attr("stroke", C.jack).attr("stroke-width", 2.6);
     g.append("text").attr("x", env.x(0.12)).attr("y", env.y(0.05)).attr("text-anchor", "end").attr("class", "ax-note").style("font-size", "10px").attr("fill", C.jack).text("ASCM, jackknife rule");
   }
@@ -495,9 +544,18 @@
     env.pw = W - M.l - M.r; env.ph = H - M.t - M.b;
     env.x = d3.scaleLinear().range([0, env.pw]);
     var root = svg.append("g").attr("transform", "translate(" + M.l + "," + M.t + ")");
+    env.gMarkerLine = root.append("g");   // beneath the marks so the line never strikes through text
     env.gStatic = root.append("g");
-    env.gMarker = root.append("g");
+    env.gMarkerLab = root.append("g");
     return env;
+  }
+  // Noise-floor edge for the focused estimator: its single-state band (mean - 2sd),
+  // or its pooled fake-2009 estimate (att - 2se) when no single-state row exists.
+  function placeboEdge() {
+    var P = DATA.placebo, m = P.focus_map[state.focus];
+    if (m) { var s = P.single[m]; return s.mean - 2 * s.sd; }
+    var p = P.pooled2009[state.focus];
+    return p.att - 2 * p.se;
   }
   function placeboDiamond(g, x, y, r, fill) {
     g.append("path").attr("d", "M" + x + "," + (y - r) + "L" + (x + r) + "," + y + "L" + x + "," + (y + r) + "L" + (x - r) + "," + y + "Z")
@@ -529,6 +587,12 @@
 
     rows.forEach(function (m, i) {
       var s = P.single[m], y0 = i * rowH, yc = y0 + rowH * 0.62, isFocus = m === focusMethod;
+      if (isFocus) {
+        g.append("rect").attr("x", -6).attr("y", y0 + 2).attr("width", env.pw + 12).attr("height", rowH - 4)
+          .attr("rx", 3).attr("fill", C.cal).attr("opacity", 0.045);
+        g.append("rect").attr("x", -6).attr("y", y0 + 2).attr("width", 2.5).attr("height", rowH - 4)
+          .attr("fill", C.cal).attr("opacity", 0.55);
+      }
       g.append("text").attr("x", 0).attr("y", y0 + 13).attr("class", "ax-label").style("font-size", fs + "px")
         .attr("fill", isFocus ? C.ink : C.inkFaint).style("font-weight", isFocus ? "600" : "400")
         .text(s.label + "  ·  mean " + eff1(s.mean) + ", sd " + (Math.abs(s.sd) * 100).toFixed(1) + "pp");
@@ -555,9 +619,17 @@
     DATA.meta.estimator_order.forEach(function (est) {
       var p = P.pooled2009[est]; if (!p) return;
       var isFocus = est === state.focus;
-      g.append("circle").attr("cx", env.x(p.att)).attr("cy", ycP).attr("r", isFocus ? (env.detail ? 6 : 5) : (env.detail ? 4 : 3.5))
+      var r = isFocus ? (env.detail ? 6 : 5) : (env.detail ? 4 : 3.5);
+      g.append("circle").attr("cx", env.x(p.att)).attr("cy", ycP).attr("r", r)
         .attr("fill", SWATCH[est]).attr("stroke", C.panel).attr("stroke-width", 1)
         .attr("opacity", isFocus ? 1 : 0.75);
+      if (isFocus) {
+        g.append("circle").attr("cx", env.x(p.att)).attr("cy", ycP).attr("r", r + 3.5)
+          .attr("fill", "none").attr("stroke", SWATCH[est]).attr("stroke-width", 1.5);
+        g.append("text").attr("x", env.x(p.att)).attr("y", ycP - r - 8).attr("text-anchor", "middle")
+          .attr("class", "ax-note").style("font-size", (sub - 1) + "px").attr("fill", SWATCH[est])
+          .style("font-weight", "600").text(DATA.estimators[est].short);
+      }
     });
 
     // axis
@@ -579,27 +651,37 @@
     }
   }
   function drawPlaceboMarker(env) {
-    var g = env.gMarker; g.selectAll("*").remove();
+    var gl = env.gMarkerLine, gt = env.gMarkerLab;
+    gl.selectAll("*").remove(); gt.selectAll("*").remove();
     if (!DATA.placebo) return;
     var v = dkDec(state.dk), mx = env.x(v);
-    g.append("line").attr("x1", mx).attr("x2", mx).attr("y1", 2).attr("y2", env.ph)
-      .attr("stroke", C.ink).attr("stroke-width", 1.2).attr("stroke-dasharray", "5 4").attr("opacity", 0.65);
+    var inside = v >= placeboEdge();
+    gl.append("line").attr("x1", mx).attr("x2", mx).attr("y1", 2).attr("y2", env.ph)
+      .attr("stroke", inside ? C.inkFaint : C.cal).attr("stroke-width", inside ? 1.2 : 1.8)
+      .attr("stroke-dasharray", "5 4").attr("opacity", inside ? 0.5 : 0.9);
     var left = mx < env.pw * 0.5;
-    g.append("text").attr("x", mx + (left ? 6 : -6)).attr("y", env.ph - 5).attr("text-anchor", left ? "start" : "end")
-      .attr("class", "ax-note").style("font-size", (env.detail ? 11 : 10) + "px").attr("fill", C.ink)
-      .text("a true effect of " + effI(v));
+    gt.append("text").attr("x", mx + (left ? 6 : -6)).attr("y", env.ph - 5).attr("text-anchor", left ? "start" : "end")
+      .attr("class", "ax-note").style("font-size", (env.detail ? 11 : 10) + "px")
+      .attr("fill", inside ? C.inkSoft : C.cal)
+      .text("a true effect of " + effI(v) + " · " + (inside ? "inside the noise floor" : "clears the noise floor"));
   }
 
   function drawReading() {
     var c = focusCell(), est = DATA.estimators[state.focus], el = document.getElementById("reading");
+    // "jackknife" only for the primary estimator (its actual inference); the rest
+    // use neutral terms. The over-rejects clause mirrors the SE panel's verdict.
+    var testName = est.primary ? "jackknife test" : "standard-error test";
+    var seName = est.primary ? "jackknife standard error" : "reported standard error";
+    var already = est.primary ? "already " : "";
+    var tail = cell(state.focus, "0").reject_se > OVERSIZE ? ": too narrow, so the test over-rejects." : ".";
     if (state.dk === "0") {
       el.innerHTML = "The injected effect is zero. " + est.label + " returns a mean estimate of <strong>" + eff1(c.mean_att) +
-        "</strong>. The jackknife test rejects <strong>" + pct1(c.reject_se) + "</strong> of draws and the calibrated test rejects <strong>" +
-        pct1(c.reject_ri) + "</strong>. The jackknife standard error is already <strong>" + c.se_ratio.toFixed(1) + "×</strong> the true sampling dispersion.";
+        "</strong>. The " + testName + " rejects <strong>" + pct1(c.reject_se) + "</strong> of draws and the calibrated test rejects <strong>" +
+        pct1(c.reject_ri) + "</strong>. The " + seName + " is " + already + "<strong>" + c.se_ratio.toFixed(1) + "×</strong> the true sampling dispersion" + tail;
     } else {
       el.innerHTML = "The injected effect is <strong>" + effI(dkDec(state.dk)) + "</strong>. " + est.label + " recovers a mean estimate of <strong>" +
-        eff1(c.mean_att) + "</strong>. The jackknife test rejects <strong>" + pct1(c.reject_se) + "</strong> of draws. The calibrated test rejects <strong>" +
-        pct1(c.reject_ri) + "</strong>. The jackknife standard error is <strong>" + c.se_ratio.toFixed(1) + "×</strong> the true spread.";
+        eff1(c.mean_att) + "</strong>. The " + testName + " rejects <strong>" + pct1(c.reject_se) + "</strong> of draws. The calibrated test rejects <strong>" +
+        pct1(c.reject_ri) + "</strong>. The " + seName + " is <strong>" + c.se_ratio.toFixed(1) + "×</strong> the true spread" + tail;
     }
   }
 
@@ -624,8 +706,9 @@
     modalSvg.selectAll("*").remove();
     var cap = document.getElementById("modal-cap"); cap.innerHTML = "";
     if (kind === "hero") {
-      modalSvg.attr("viewBox", "0 0 900 520");
-      var e = buildHeroEnv(modalSvg, 900, 520, true);
+      var hw = NARROW_MQ.matches ? 520 : 900, hh = NARROW_MQ.matches ? 600 : 520;
+      modalSvg.attr("viewBox", "0 0 " + hw + " " + hh);
+      var e = buildHeroEnv(modalSvg, hw, hh, true);
       drawHeroFrame(e); drawHeroGhost(e); drawHeroLive(e, focusCell().att, focusCell().se_claimed, focusCell().mean_att);
       cap.appendChild(legendNode());
       cap.appendChild(note("At " + effI(dkDec(state.dk)) + " the estimates from " + DATA.estimators[state.focus].label +
@@ -633,9 +716,7 @@
     } else if (kind === "se") {
       modalSvg.attr("viewBox", "0 0 900 300");
       drawSE(buildSEEnv(modalSvg, 900, 300, true));
-      cap.appendChild(note(state.focus === "multisynth"
-        ? "The ratio divides the mean jackknife standard error by the standard deviation of the point estimates across draws. The jackknife runs several times too wide and widens further with the effect, so its test cannot reject."
-        : "The ratio divides the estimator's mean reported standard error by the standard deviation of the point estimates across draws. A ratio below one means the reported error runs narrower than the truth, so the test over-rejects."));
+      cap.appendChild(note("The ratio divides the estimator's mean reported standard error by the standard deviation of the point estimates across draws. " + seVerdict()));
     } else if (kind === "placebo") {
       modalSvg.attr("viewBox", "0 0 900 520");
       var q = buildPlaceboEnv(modalSvg, 900, 520, true);
@@ -691,6 +772,13 @@
   window.addEventListener("resize", function () {
     if (!slEl) return;
     placeThumb(DKEYS.indexOf(state.dk), false);
+  });
+  // rebuild the hero ladder when the narrow breakpoint flips
+  NARROW_MQ.addEventListener("change", function () {
+    if (!DATA || !heroInline) return;
+    heroInline = buildHeroEnv(d3.select("#hero"), 680, 408, false);
+    drawHeroFrame(heroInline); drawHeroGhost(heroInline);
+    drawHeroLive(heroInline, focusCell().att, focusCell().se_claimed, focusCell().mean_att);
   });
 
 })();
