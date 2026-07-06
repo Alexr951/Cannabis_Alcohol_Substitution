@@ -104,8 +104,14 @@
 
     </div>
 
-    <!-- RIGHT: power curve + controls + reading -->
+    <!-- RIGHT: controls + power curve + reading -->
     <div class="col-side">
+
+      <section class="panel est-panel" aria-label="Estimators">
+        <h3 class="mini-head">Estimators</h3>
+        <p class="mini-note">Click a name to read its distribution to the left; the box toggles its power curve below.</p>
+        <ul id="est-list" class="est-list"></ul>
+      </section>
 
       <section class="panel power-panel" aria-label="Power curves">
         <div class="panel-head">
@@ -118,12 +124,6 @@
                aria-label="Power curves with the plausible-effect band and minimum detectable effects"></svg>
         </figure>
         <p id="mde-callout" class="mde-callout"></p>
-      </section>
-
-      <section class="panel est-panel" aria-label="Estimators">
-        <h3 class="mini-head">Estimators</h3>
-        <p class="mini-note">Click a name to read its distribution above; the box toggles its curve.</p>
-        <ul id="est-list" class="est-list"></ul>
       </section>
 
       <section class="panel read-panel" aria-label="Reading">
