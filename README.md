@@ -18,6 +18,20 @@ calibrated inference the minimum detectable effect at 80% power ranges from 4.5%
 survey and smaller quasi-experimental evidence point, sit below the detection limit of
 every estimator considered.
 
+## Interactive dashboard
+
+**Live at <https://alexr951.github.io/Cannabis_Alcohol_Substitution/>.** A single-page
+companion to the power analysis: one slider moves the true substitution effect δ across
+the five simulated sizes (0 to −12%) while the sampling distribution, the standard-error
+inflation ratio, the backdated-placebo noise floor, and the power curves update. The
+page is a pure replay of the committed results in `Results/csv/`; nothing is estimated
+in the browser. `dashboard/prep/build_dashboard_data.py` packs the result CSVs into
+`dashboard/public/data/power.json` (with self-checks against the committed diagnostics),
+and the front end is vanilla JavaScript and D3 with no build step. Deployment is
+automatic: `.github/workflows/deploy-pages.yml` publishes `dashboard/public/` to GitHub
+Pages on every push to `main`. To run it locally, serve the folder with
+`python -m http.server` from `dashboard/public`.
+
 ## Pipeline (hybrid Python + R)
 
 ```
@@ -29,6 +43,8 @@ run_all.R + R/01..10         estimation engine (cached): sample rules, six estim
 Results/csv/                 tidy results (every paper number traces here)
 Results/cache/               RDS caches (delete for a cold run; ~70 min on 6 cores)
 Results/figures/             all figures used in the paper
+dashboard/                   interactive companion (prep script + static site,
+                             deployed to GitHub Pages by the Actions workflow)
 ```
 
 One-command reproduction (after installing dependencies):
