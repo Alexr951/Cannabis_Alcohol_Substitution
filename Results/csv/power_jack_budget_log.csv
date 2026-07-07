@@ -1,0 +1,2 @@
+decision,secs_per_draw,projected_min,n_draws,deltas
+"full jackknife arm: 5 deltas + phased, paired to committed draws",2.61,17.4,400,0 -0.02 -0.05 -0.08 -0.12

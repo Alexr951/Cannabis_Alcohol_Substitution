@@ -1,0 +1,2 @@
+augsynth_version,augsynth_sha,default_inf_type,r_version,seed,n_draws_per_cell,deltas_run,n_degrade_decisions,total_wall_min
+0.2.0,7a90ea48877fae7925a72cb50bc03a315bc7c042,bootstrap,R version 4.4.1 (2024-06-14 ucrt),20260524,400,0 -0.02 -0.05 -0.08 -0.12,0,22.3

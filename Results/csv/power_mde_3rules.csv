@@ -1,0 +1,4 @@
+rule,mde_delta,mde_drinks_per_month,baseline_gal_ethanol_21
+default_bootstrap,,,2.83678
+jackknife,-0.0722916666666667,3.64578762962963,2.83678
+ri_calibrated,-0.0642335766423358,3.23940489862125,2.83678
