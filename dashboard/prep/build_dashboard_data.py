@@ -20,6 +20,10 @@ OUT = ROOT / "dashboard" / "public" / "data" / "power.json"
 SOURCES = [
     "power_draws.csv", "power_results.csv", "power_ri_thresholds.csv",
     "power_jackknife_diag.csv", "power_mde.csv", "power_mde_by_estimator.csv",
+    "power_draws_jack.csv", "power_results_3rules.csv",
+    "power_se_diag_3rules.csv", "power_mde_3rules.csv",
+    "multisynth_overall_jack.csv", "intime_pooled_jack.csv",
+    "robustness_jack.csv",
     "intime_placebo_single.csv", "intime_placebo_pooled2009.csv",
     "intime_placebo_pooled2007.csv", "multisynth_overall.csv",
     "sdid_primary.csv", "gsynth_primary.csv", "cs_twfe_primary.csv",
@@ -92,9 +96,27 @@ def main():
     thresh = pd.read_csv(CSV / "power_ri_thresholds.csv").set_index("estimator")["ri_thresh"]
     diag = pd.read_csv(CSV / "power_jackknife_diag.csv")
     mde = pd.read_csv(CSV / "power_mde_by_estimator.csv").set_index("estimator")
+    draws_jack = pd.read_csv(CSV / "power_draws_jack.csv")
+    res3 = pd.read_csv(CSV / "power_results_3rules.csv").set_index(["estimator", "delta"])
+    mde3 = pd.read_csv(CSV / "power_mde_3rules.csv").set_index("rule")
 
     res = results.set_index(["estimator", "delta"])
     deltas = [0.0, -0.02, -0.05, -0.08, -0.12]
+
+    # The jackknife rerun is paired draw-for-draw with the committed simulation:
+    # same estimator/delta/draw ids, identical att, identical bootstrap SE.
+    paired = draws.merge(
+        draws_jack, on=["estimator", "delta", "draw"], suffixes=("", "_j"))
+    ms_rows = draws[draws.estimator.isin(["multisynth", "multisynth_phased"])]
+    assert len(paired) == len(ms_rows), \
+        f"pairing incomplete: {len(paired)} merged rows vs {len(ms_rows)} multisynth rows"
+    d_att = (paired.att - paired.att_j).abs().max()
+    d_se = (paired.se - paired.se_boot).abs().max()
+    assert d_att <= 1e-8 and d_se <= 1e-8, \
+        f"paired draws diverge: max|d_att|={d_att}, max|d_se|={d_se}"
+    print(f"pairing self-check passed: {len(paired)} draws, "
+          f"max|d_att|={d_att:.1e}, max|d_se|={d_se:.1e}")
+    jack_by = draws_jack.set_index(["estimator", "delta"])
 
     # True sampling dispersion = SD of the estimator's delta=0 point estimates,
     # held constant across delta (a constant injected shift does not change spread).
@@ -124,18 +146,34 @@ def main():
     def cell(est, delta):
         g = draws[(draws.estimator == est) & np.isclose(draws.delta, delta)].sort_values("draw")
         r = res.loc[(est, delta)]
-        claimed = float(g.se.mean())
+        boot_mean = float(g.se.mean())
         true = se_true[est]
-        return {
+        out = {
             "att": [sig(v) for v in g.att.tolist()],
-            "se": [sig(v) for v in g.se.tolist()],
+            "se_boot": [sig(v) for v in g.se.tolist()],
             "reject_se": sig(float(r.reject_se)),
             "reject_ri": sig(float(r.reject_ri)),
             "mean_att": sig(float(r.mean_att)),
-            "se_claimed": sig(claimed),   # mean jackknife / own SE at this delta
-            "se_true": sig(true),         # constant true sampling dispersion
-            "se_ratio": sig(claimed / true),
+            "se_boot_mean": sig(boot_mean),  # mean own/default SE at this delta
+            "se_true": sig(true),            # constant true sampling dispersion
+            "se_boot_ratio": sig(boot_mean / true),
         }
+        if est == PRIMARY:
+            gj = draws_jack[(draws_jack.estimator == est) &
+                            np.isclose(draws_jack.delta, delta)].sort_values("draw")
+            r3 = res3.loc[(est, delta)]
+            jack_mean = float(gj.se_jack.mean())
+            # the replayed per-draw arrays must reproduce the summary CSV
+            rej = float((np.abs(gj.att / gj.se_jack) > 1.96).mean())
+            assert abs(rej - float(r3.reject_jack)) < 1e-9, \
+                f"reject_jack mismatch at delta={delta}: {rej} vs {r3.reject_jack}"
+            assert abs(jack_mean - float(r3.mean_se_jack)) < 1e-6, \
+                f"mean se_jack mismatch at delta={delta}: {jack_mean} vs {r3.mean_se_jack}"
+            out["se_jack"] = [sig(v) for v in gj.se_jack.tolist()]
+            out["reject_jack"] = sig(float(r3.reject_jack))
+            out["se_jack_mean"] = sig(jack_mean)
+            out["se_jack_ratio"] = sig(jack_mean / true)
+        return out
 
     estimators = {}
     for est in ORDER:
@@ -152,15 +190,27 @@ def main():
             "deltas": {pct_key(d): cell(est, d) for d in deltas},
         }
 
+    # The jackknife SE is exactly shift-invariant to the injected effect, so its
+    # ratio must be flat across the pure-delta cells (relative 1e-6).
+    jm = [estimators[PRIMARY]["deltas"][pct_key(d)]["se_jack_mean"] for d in deltas]
+    flat = (max(jm) - min(jm)) / (sum(jm) / len(jm))
+    assert flat < 1e-6, f"jackknife SE not flat across delta: rel. range {flat}"
+    assert abs(estimators[PRIMARY]["deltas"]["0"]["reject_jack"]
+               - float(res3.loc[(PRIMARY, 0.0), "reject_jack"])) < 1e-9
+    print("jackknife self-check passed: per-draw arrays reproduce "
+          "power_results_3rules.csv; SE flat across delta")
+
     # Phase-in cell: -5% ramped over three years (final row of Table 6).
     gp = draws[(draws.estimator == "multisynth_phased")].sort_values("draw")
     rp = res.loc[("multisynth_phased", -0.05)]
+    rp3 = res3.loc[("multisynth_phased", -0.05)]
     phased = {
         "label": "ASCM, 3-yr phase-in",
         "delta": -0.05,
         "att": [sig(v) for v in gp.att.tolist()],
-        "se": [sig(v) for v in gp.se.tolist()],
+        "se_boot": [sig(v) for v in gp.se.tolist()],
         "reject_se": sig(float(rp.reject_se)),
+        "reject_jack": sig(float(rp3.reject_jack)),
         "reject_ri": sig(float(rp.reject_ri)),
         "mean_att": sig(float(rp.mean_att)),
     }
@@ -169,6 +219,8 @@ def main():
     baseline = float(mde_all["baseline_gal_ethanol_21"].iloc[0])
     mde_primary = float(mde_all.loc["ri_calibrated", "mde_delta"])
     mde_drinks = float(mde_all.loc["ri_calibrated", "mde_drinks_per_month"])
+    mde_jack = float(mde3.loc["jackknife", "mde_delta"])
+    mde_jack_drinks = float(mde3.loc["jackknife", "mde_drinks_per_month"])
 
     # ---- In-time / backdated placebo section (Section IV of the paper) ----
     single = pd.read_csv(CSV / "intime_placebo_single.csv")
@@ -251,8 +303,36 @@ def main():
                  "points; clean-fit states only."),
     }
 
+    # Primary real-data estimate under both standard errors.
+    ovj = pd.read_csv(CSV / "multisynth_overall_jack.csv").iloc[0]
+    real_data = {
+        "att": sig(float(ovj.att)),
+        "se_boot": sig(float(ovj.se_boot)),
+        "se_jack": sig(float(ovj.se_jack)),
+        "ci_boot": [sig(float(ovj.ci_lo_boot)), sig(float(ovj.ci_hi_boot))],
+        "ci_jack": [sig(float(ovj.ci_lo_jack)), sig(float(ovj.ci_hi_jack))],
+        "t_boot": sig(float(ovj.att / ovj.se_boot)),
+        "t_jack": sig(float(ovj.att / ovj.se_jack)),
+        "pct": sig(float(ovj.pct)),
+    }
+    # sanity: the pooled placebo bootstrap SEs already in `placebo` must agree
+    # with intime_pooled_jack.csv's se_boot column (same committed values)
+    ipj = pd.read_csv(CSV / "intime_pooled_jack.csv").set_index("fake_t0")
+    for yr in (2009, 2007):
+        committed = placebo_pooled[f"pooled{yr}"]["multisynth"]["se"]  # sig(6)-rounded
+        assert abs(committed - float(ipj.loc[yr, "se_boot"])) < 1e-6, \
+            f"pooled{yr} bootstrap SE mismatch vs intime_pooled_jack.csv"
+    placebo_jack = {
+        str(yr): {
+            "att": sig(float(ipj.loc[yr, "att"])),
+            "se_jack": sig(float(ipj.loc[yr, "se_jack"])),
+            "t_jack": sig(float(ipj.loc[yr, "t_jack"])),
+        }
+        for yr in (2009, 2007)
+    }
+
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "meta": {
             "seed": 20260524,
             "deltas": deltas,
@@ -261,6 +341,8 @@ def main():
             "baseline_gal_ethanol_21": baseline,
             "mde_delta_primary": sig(mde_primary),
             "mde_drinks_per_month": sig(mde_drinks),
+            "mde_jack_delta": sig(mde_jack),
+            "mde_jack_drinks": sig(mde_jack_drinks),
             "sources": SOURCES,
             "note": "Every value traces to a committed file in Results/csv/.",
         },
@@ -268,6 +350,8 @@ def main():
         "estimators": estimators,
         "phased": phased,
         "placebo": placebo,
+        "real_data": real_data,
+        "placebo_jack": placebo_jack,
     }
 
     OUT.parent.mkdir(parents=True, exist_ok=True)

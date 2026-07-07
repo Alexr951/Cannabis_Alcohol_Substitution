@@ -9,7 +9,8 @@
   var C = {
     ink: v("--ink"), inkSoft: v("--ink-soft"), inkFaint: v("--ink-faint"),
     rule: v("--rule"), cloud: v("--cloud"), cal: v("--calibrated"),
-    jack: v("--jackknife"), band: v("--band"), panel: v("--panel")
+    def: v("--default-rule"), jack: v("--jack-rule"),
+    band: v("--band"), panel: v("--panel")
   };
   var SWATCH = {
     multisynth: C.cal,
@@ -33,7 +34,7 @@
   function dkDec(dk) { return (+dk) / 100; }
 
   // ?v matches schema_version so a stale cached copy is never replayed
-  d3.json("data/power.json?v=2").then(function (data) {
+  d3.json("data/power.json?v=3").then(function (data) {
     DATA = data;
     DATA.meta.estimator_order.forEach(function (e) { state.active[e] = true; });
     var parts = (location.hash || "").replace("#", "").split("/");  // deep link: #-12 or #-8/hero
@@ -44,12 +45,13 @@
     buildSlider();
     buildEstList();
     buildLegend();
-    heroInline = buildHeroEnv(d3.select("#hero"), 680, 408, false);
-    seInline = buildSEEnv(d3.select("#se"), 680, 230, false);
+    heroInline = buildHeroEnv(d3.select("#hero"), 680, 424, false);
+    seInline = buildSEEnv(d3.select("#se"), 680, 260, false);
     powInline = buildPowerEnv(d3.select("#power"), 520, 432, false);
     plaInline = buildPlaceboEnv(d3.select("#placebo"), 680, 300, false);
     initModal();
     fillMdeCallout();
+    drawReadingStatic();
     update(true);
     document.getElementById("app").setAttribute("aria-busy", "false");
     var TITLES = { hero: "Sampling distribution", se: "Standard error inflation", power: "Power curves", placebo: "The observed noise floor" };
@@ -124,10 +126,14 @@
       box.addEventListener("keydown", function (ev) { if (ev.key === " " || ev.key === "Enter") { ev.preventDefault(); toggle(est); } });
       var sw = mk("span"); sw.className = "est-swatch";
       var lab = mk("span"); lab.className = "est-label"; lab.textContent = e.label;
-      var tail = mk("span");
-      if (e.primary) { tail.className = "est-tag"; tail.textContent = "primary"; }
-      else { tail.className = "est-mde"; tail.textContent = e.mde_ri ? "MDE " + (Math.abs(e.mde_ri) * 100).toFixed(1) + "%" : ""; }
-      li.appendChild(box); li.appendChild(sw); li.appendChild(lab); li.appendChild(tail);
+      li.appendChild(box); li.appendChild(sw); li.appendChild(lab);
+      if (e.primary) {
+        var tag = mk("span"); tag.className = "est-tag"; tag.textContent = "primary";
+        li.appendChild(tag);
+      }
+      var tail = mk("span"); tail.className = "est-mde";
+      tail.textContent = e.mde_ri ? "MDE " + (Math.abs(e.mde_ri) * 100).toFixed(1) + "%" : "";
+      li.appendChild(tail);
       li.addEventListener("click", function () { setFocus(est); });
       li.tabIndex = 0; li.setAttribute("role", "button");
       li.setAttribute("aria-label", "Read " + e.label + " in the charts");
@@ -149,11 +155,12 @@
   function setFocus(est) {
     if (!state.active[est]) state.active[est] = true;
     state.focus = est;
-    syncEstList(); refreshHeroLabels();
+    syncEstList(); refreshHeroLabels(); buildLegend();
     setCounters(focusCell(), true);
-    heroInline = buildHeroEnv(d3.select("#hero"), 680, 408, false);
+    heroInline = buildHeroEnv(d3.select("#hero"), 680, 424, false);
     drawHeroFrame(heroInline); drawHeroGhost(heroInline);
-    drawHeroLive(heroInline, focusCell().att, focusCell().se_claimed, focusCell().mean_att);
+    drawHeroLive(heroInline, focusCell().att, focusCell().se_boot_mean, focusCell().mean_att);
+    drawChaseCallout(heroInline);
     drawSE(seInline); drawPowerCurves(powInline); drawReading();
     drawPlaceboStatic(plaInline); drawPlaceboMarker(plaInline);
   }
@@ -173,27 +180,40 @@
     updateChartAria();
   }
   // One sentence on what the SE ratio means for the focused estimator's test.
-  // Branches on the same delta=0 size flag as the jackknife-counter caption, then
-  // on the panel's existing 1.05 qualifier bound, so the three never disagree.
+  // Branches on the same delta=0 size flag as the counter caption, then on the
+  // panel's 1.05 qualifier bound, so the three never disagree.
   function seVerdict() {
     var c0 = cell(state.focus, "0");
+    if (DATA.estimators[state.focus].primary) {
+      return "The default's multiple grows exactly when there is something to find: the wild bootstrap's replicate variance scales with the level of the treated-unit effects. The jackknife's does not.";
+    }
     if (c0.reject_se > OVERSIZE) {
-      return "The claimed error understates the true spread, so the test rejects too often: its nominal 5 percent size is really " + pct1(c0.reject_se) + ".";
+      return "The reported error understates the true spread, so the test rejects too often: its nominal 5 percent size is really " + pct1(c0.reject_se) + ".";
     }
-    if (c0.se_ratio > 1.05) {
-      return "This multiple grows with the effect, which is why the jackknife test rarely fires.";
+    if (c0.se_boot_ratio > 1.05) {
+      return "This multiple grows with the effect, which is why the default test rarely fires.";
     }
-    return "The claimed error runs narrower than the true spread, but the test still holds close to its nominal 5 percent size.";
+    return "The reported error runs narrower than the true spread, but the test still holds close to its nominal 5 percent size.";
   }
   // text alternatives: keep each chart's aria-label in step with the state
   function updateChartAria() {
     var c = focusCell(), est = DATA.estimators[state.focus].label, d = effI(dkDec(state.dk));
-    d3.select("#hero").attr("aria-label", "Sampling distribution for " + est + " at injected effect " + d +
-      ". The jackknife test rejects " + pct1(c.reject_se) + " of draws, the calibrated test " + pct1(c.reject_ri) + ".");
-    d3.select("#se").attr("aria-label", "Standard error inflation for " + est + " at " + d +
-      ": the claimed standard error is " + c.se_ratio.toFixed(1) + " times the true sampling spread.");
+    var primary = DATA.estimators[state.focus].primary;
+    d3.select("#hero").attr("aria-label", primary
+      ? ("Sampling distribution for " + est + " at injected effect " + d +
+         ". The default test, a wild bootstrap, rejects " + pct1(c.reject_se) + " of draws, the jackknife " +
+         pct1(c.reject_jack) + ", the calibrated test " + pct1(c.reject_ri) + ".")
+      : ("Sampling distribution for " + est + " at injected effect " + d +
+         ". The native standard-error test rejects " + pct1(c.reject_se) + " of draws, the calibrated test " + pct1(c.reject_ri) + "."));
+    d3.select("#se").attr("aria-label", primary
+      ? ("Standard errors for " + est + " at " + d + ": the default wild bootstrap is " +
+         c.se_boot_ratio.toFixed(1) + " times the true sampling spread, the jackknife " +
+         c.se_jack_ratio.toFixed(2) + " times.")
+      : ("Standard error for " + est + " at " + d + ": the reported standard error is " +
+         c.se_boot_ratio.toFixed(1) + " times the true sampling spread."));
     d3.select("#power").attr("aria-label", "Power curves. At a true effect of " + d + ", " + est +
-      " rejects " + pct1(c.reject_ri) + " of draws under the calibrated test.");
+      " rejects " + pct1(c.reject_ri) + " of draws under the calibrated test" +
+      (primary ? " and " + pct1(c.reject_jack) + " under the jackknife." : "."));
     if (DATA.placebo) {
       var m = DATA.placebo.focus_map[state.focus];
       var verdict = dkDec(state.dk) >= placeboEdge() ? " sits inside this noise floor." : " clears this noise floor.";
@@ -218,7 +238,8 @@
     if (first) {
       drawSE(seInline);
       drawHeroFrame(heroInline); drawHeroGhost(heroInline);
-      drawHeroLive(heroInline, focusCell().att, focusCell().se_claimed, focusCell().mean_att);
+      drawHeroLive(heroInline, focusCell().att, focusCell().se_boot_mean, focusCell().mean_att);
+      drawChaseCallout(heroInline);
       drawPowerStatic(powInline); drawPowerCurves(powInline); drawPowerMarker(powInline);
       drawPlaceboStatic(plaInline); drawPlaceboMarker(plaInline);
     } else {
@@ -230,21 +251,36 @@
   // (1.5x the nominal 5% size, clear of sampling noise at 200 draws).
   var OVERSIZE = 0.075;
   function setCounters(c, pulse) {
-    var j = document.getElementById("c-jack"), k = document.getElementById("c-cal");
-    j.textContent = pct1(c.reject_se); k.textContent = pct1(c.reject_ri);
-    document.getElementById("c-jack-cap").textContent =
-      cell(state.focus, "0").reject_se > OVERSIZE ? "over-rejects: SE too narrow" : "as used in applied work";
-    if (pulse) { reflow(j); reflow(k); j.classList.add("pulse"); k.classList.add("pulse"); }
+    var d = document.getElementById("c-def"), j = document.getElementById("c-jack"),
+        k = document.getElementById("c-cal");
+    var primary = DATA.estimators[state.focus].primary;
+    d.textContent = pct1(c.reject_se); k.textContent = pct1(c.reject_ri);
+    document.getElementById("c-def-cap").textContent = primary
+      ? "wild bootstrap, as conventionally run"
+      : (cell(state.focus, "0").reject_se > OVERSIZE ? "native SE test · over-rejects: SE too narrow" : "native SE test");
+    if (primary) {
+      j.textContent = pct1(c.reject_jack);
+      j.parentNode.classList.remove("na");
+      document.getElementById("c-jack-cap").textContent = "same fits, held to 1.96";
+    } else {
+      j.textContent = "—";
+      j.parentNode.classList.add("na");
+      document.getElementById("c-jack-cap").textContent = "primary estimator only";
+    }
+    if (pulse) { reflow(d); reflow(j); reflow(k); d.classList.add("pulse"); j.classList.add("pulse"); k.classList.add("pulse"); }
   }
 
   function buildLegend() {
+    var primary = DATA.estimators[state.focus].primary;
     var items = [
       { cls: "lg-live", t: "estimates at current δ" },
       { cls: "lg-null", t: "null distribution (δ = 0)" },
-      { cls: "lg-cal", t: "calibrated region" },
-      { cls: "lg-jack", t: "jackknife region" }
+      { cls: "lg-cal", t: "calibrated threshold" }
     ];
+    if (primary) items.push({ cls: "lg-jack", t: "jackknife threshold" });
+    items.push({ cls: "lg-def", t: primary ? "default region (wild bootstrap)" : "reported-SE region" });
     var el = document.getElementById("hero-legend");
+    el.innerHTML = "";
     items.forEach(function (it) {
       var s = mk("span"); s.className = "lg-item";
       var sw = mk("span"); sw.className = "lg-sw " + it.cls;
@@ -268,11 +304,17 @@
     // narrow mode: the svg scales down ~0.47x on phones, so below-axis text gets
     // LARGER user-unit fonts plus a taller ladder to stay legible after scaling
     var narrow = NARROW_MQ.matches;
-    var M = { t: 16, r: 18, b: detail ? (narrow ? 128 : 96) : (narrow ? 124 : 82), l: 18 };
+    // two fixed rows below the axis (readout, axis title); the threshold lines
+    // are identified by the color legend, not by moving labels
+    var M = { t: 16, r: 18, b: detail ? (narrow ? 96 : 64) : (narrow ? 84 : 58), l: 18 };
     var env = { svg: svg, W: W, H: H, M: M, detail: detail, narrow: narrow };
     env.pw = W - M.l - M.r; env.ph = H - M.t - M.b;
     env.x = d3.scaleLinear().domain([-0.27, 0.10]).range([0, env.pw]);
     var fc = focusCell(), n = DATA.estimators[state.focus].n_draws;
+    env.primary = DATA.estimators[state.focus].primary;
+    // fixed jackknife gate: the jackknife SE is flat across delta, so the
+    // delta = 0 cell's mean is the gate at every stop
+    env.jackHalf = env.primary ? 1.96 * cell(state.focus, "0").se_jack_mean : null;
     env.bw = 1.06 * fc.se_true * Math.pow(n, -0.2);   // Silverman bandwidth
     var nx = detail ? 120 : 70;
     env.xs = d3.range(nx).map(function (i) { return -0.27 + (i / (nx - 1)) * 0.37; });
@@ -285,30 +327,37 @@
     // clip used to paint the share of the cloud past the calibrated threshold
     defs.append("clipPath").attr("id", cid).append("rect")
       .attr("x", 0).attr("y", -6).attr("width", env.x(-DATA.estimators[state.focus].ri_thresh)).attr("height", env.ph + 6);
-    // diagonal hatch so the jackknife region reads without color
+    // diagonal hatch so the default region reads without color
     var pid = "hatch" + (clipSeq++);
     env.hatch = pid;
     defs.append("pattern").attr("id", pid).attr("width", 6).attr("height", 6).attr("patternUnits", "userSpaceOnUse")
-      .append("path").attr("d", "M0,6 l6,-6").attr("stroke", C.jack).attr("stroke-width", 1).attr("opacity", 0.35);
+      .append("path").attr("d", "M0,6 l6,-6").attr("stroke", C.def).attr("stroke-width", 1).attr("opacity", 0.35);
     var root = svg.append("g").attr("transform", "translate(" + M.l + "," + M.t + ")");
     env.gFrame = root.append("g");
     env.gGhost = root.append("g");
     env.gDyn = root.append("g");
     env.gAxis = root.append("g");
+    env.gCallout = root.append("g");
     return env;
   }
   function drawHeroFrame(env) {
     var g = env.gFrame; g.selectAll("*").remove();
     var thr = DATA.estimators[state.focus].ri_thresh;
-    var xL = 0, xR = env.pw, fs = env.narrow ? 16 : (env.detail ? 12 : 11);
-    [[xL, env.x(-thr)], [env.x(thr), xR]].forEach(function (s) {
-      g.append("rect").attr("x", s[0]).attr("y", -6).attr("width", Math.max(0, s[1] - s[0])).attr("height", env.ph + 6)
-        .attr("fill", C.cal).attr("opacity", 0.06);
-    });
+    var fs = env.narrow ? 16 : (env.detail ? 12 : 11);
+    // calibrated gates: vertical lines only (area shading is reserved for the
+    // default region so three rules never stack into mud)
     [-thr, thr].forEach(function (t) {
       g.append("line").attr("x1", env.x(t)).attr("x2", env.x(t)).attr("y1", -6).attr("y2", env.ph)
-        .attr("stroke", C.cal).attr("stroke-width", 1).attr("stroke-dasharray", "2 3").attr("opacity", 0.5);
+        .attr("stroke", C.cal).attr("stroke-width", 1.2).attr("stroke-dasharray", "2 3").attr("opacity", 0.65);
     });
+    // jackknife gates: fixed at ±1.96 × mean jackknife SE (flat across δ)
+    if (env.primary) {
+      [-env.jackHalf, env.jackHalf].forEach(function (t) {
+        if (env.x(t) < -2 || env.x(t) > env.pw + 2) return;
+        g.append("line").attr("x1", env.x(t)).attr("x2", env.x(t)).attr("y1", -6).attr("y2", env.ph)
+          .attr("stroke", C.jack).attr("stroke-width", 1.5).attr("opacity", 0.8);
+      });
+    }
     g.append("line").attr("x1", 0).attr("x2", env.pw).attr("y1", env.ph).attr("y2", env.ph).attr("stroke", C.ink).attr("stroke-width", 1);
     var ticks = [-0.25, -0.20, -0.15, -0.10, -0.05, 0, 0.05, 0.10];
     var ax = d3.axisBottom(env.x).tickValues(ticks).tickSize(4)
@@ -316,25 +365,10 @@
     var gax = g.append("g").attr("transform", "translate(0," + env.ph + ")").call(ax);
     gax.selectAll("text").attr("class", "tick").style("font-size", fs + "px");
     gax.select(".domain").remove();
-    // Row D: axis title on its own dedicated row, centered, below all callouts
+    // Row B: axis title, fixed position (threshold lines are identified by the legend)
     g.append("text").attr("class", "ax-label").attr("x", env.pw / 2)
-      .attr("y", env.ph + (env.narrow ? 112 : (env.detail ? 76 : 70)))
+      .attr("y", env.ph + (env.narrow ? 66 : (env.detail ? 50 : 46)))
       .attr("text-anchor", "middle").style("font-size", fs + "px").text("estimated effect (%)");
-    // Row C: calibrated-threshold label centered on its own line
-    thresholdLabel(g, thr, env.ph + (env.narrow ? 88 : (env.detail ? 60 : 56)), "calibrated threshold", C.cal, fs, env);
-  }
-  // Centers a threshold label on the right-side line of a ± pair (left line if the
-  // right one is off-plot), clamps it inside the plot, and drops a short leader tick.
-  function thresholdLabel(g, t, y, txt, color, fs, env) {
-    var xRt = env.x(t), xLt = env.x(-t);
-    var lineX = (xRt >= 0 && xRt <= env.pw) ? xRt : xLt;
-    if (lineX < 0 || lineX > env.pw) return;   // both lines outside the plot
-    g.append("line").attr("x1", lineX).attr("x2", lineX).attr("y1", env.ph).attr("y2", env.ph + 7)
-      .attr("stroke", color).attr("stroke-width", 1.2);
-    var el = g.append("text").attr("x", lineX).attr("y", y).attr("text-anchor", "middle")
-      .attr("class", "ax-note").style("font-size", fs + "px").attr("fill", color).text(txt);
-    var w = el.node().getComputedTextLength();
-    el.attr("x", Math.min(Math.max(lineX, w / 2 + 2), env.pw - w / 2 - 2));
   }
   function drawHeroGhost(env) {
     var g = env.gGhost; g.selectAll("*").remove();
@@ -343,20 +377,20 @@
     g.append("path").attr("d", area(dens)).attr("fill", C.inkFaint).attr("opacity", 0.16);
     g.append("path").attr("d", area(dens)).attr("fill", "none").attr("stroke", C.inkFaint).attr("stroke-width", 1).attr("opacity", 0.5);
   }
-  function drawHeroLive(env, att, jackSE, meanv, labelDk) {
+  function drawHeroLive(env, att, bootSE, meanv, labelDk) {
     var g = env.gDyn, ga = env.gAxis; g.selectAll("*").remove(); ga.selectAll("*").remove();
-    var thr = DATA.estimators[state.focus].ri_thresh, xL = 0, xR = env.pw;
-    var jb = 1.96 * jackSE, fs = env.narrow ? 16 : (env.detail ? 11.5 : 10.5);
-    [[xL, env.x(-jb)], [env.x(jb), xR]].forEach(function (s) {     // jackknife region moves with δ
+    var xL = 0, xR = env.pw;
+    var jb = 1.96 * bootSE, fs = env.narrow ? 16 : (env.detail ? 11.5 : 10.5);
+    [[xL, env.x(-jb)], [env.x(jb), xR]].forEach(function (s) {     // default region moves with δ
       g.append("rect").attr("x", s[0]).attr("y", -6).attr("width", Math.max(0, s[1] - s[0])).attr("height", env.ph + 6)
-        .attr("fill", C.jack).attr("opacity", 0.12);
+        .attr("fill", C.def).attr("opacity", 0.12);
       g.append("rect").attr("x", s[0]).attr("y", -6).attr("width", Math.max(0, s[1] - s[0])).attr("height", env.ph + 6)
         .attr("fill", "url(#" + env.hatch + ")");
     });
     [-jb, jb].forEach(function (t) {
       if (env.x(t) < xL - 2 || env.x(t) > xR + 2) return;
       g.append("line").attr("x1", env.x(t)).attr("x2", env.x(t)).attr("y1", -6).attr("y2", env.ph)
-        .attr("stroke", C.jack).attr("stroke-width", 1.2).attr("stroke-dasharray", "7 3").attr("opacity", 0.8);
+        .attr("stroke", C.def).attr("stroke-width", 1.2).attr("stroke-dasharray", "7 3").attr("opacity", 0.8);
     });
     var dens = kde(att, env.bw, env.xs);
     var area = d3.area().x(function (d) { return env.x(d[0]); }).y0(env.ph).y1(function (d) { return env.y(d[1]); }).curve(d3.curveBasis);
@@ -368,92 +402,169 @@
     g.append("line").attr("x1", env.x(meanv)).attr("x2", env.x(meanv)).attr("y1", env.ph).attr("y2", -2)
       .attr("stroke", C.cloud).attr("stroke-width", 1.6);
 
-    // callouts live below the baseline so nothing sits over the data
+    // Row A: injected/recovered readout at a fixed position (leader ticks
+    // still point at the data), so nothing below the axis jumps around
     var dk = labelDk || state.dk, inj = dkDec(dk), xi = env.x(inj), xm = env.x(meanv);
     ga.append("line").attr("x1", xi).attr("x2", xi).attr("y1", env.ph).attr("y2", env.ph + 7).attr("stroke", C.ink).attr("stroke-width", 1.4);
     ga.append("line").attr("x1", xm).attr("x2", xm).attr("y1", env.ph).attr("y2", env.ph + 7).attr("stroke", C.cal).attr("stroke-width", 1.4);
-    var mid = (xi + xm) / 2, anchor = mid > env.pw - 120 ? "end" : (mid < 120 ? "start" : "middle");
-    var lx = anchor === "end" ? Math.max(xi, xm) : (anchor === "start" ? Math.min(xi, xm) : mid);
-    ga.append("text").attr("x", lx).attr("y", env.ph + (env.narrow ? 40 : (env.detail ? 31 : 29))).attr("text-anchor", anchor)
+    ga.append("text").attr("x", 0).attr("y", env.ph + (env.narrow ? 42 : (env.detail ? 32 : 30))).attr("text-anchor", "start")
       .attr("class", "ax-note").style("font-size", fs + "px").attr("fill", C.ink)
       .text(env.narrow ? ("inj " + effI(inj) + ", rec " + eff1(meanv))
                        : ("injected " + effI(inj) + ", recovered " + eff1(meanv)));
-    // Row B: jackknife-threshold label centered on its own line
-    thresholdLabel(ga, jb, env.ph + (env.narrow ? 64 : (env.detail ? 46 : 43)), "jackknife threshold", C.jack, fs, env);
+  }
+  // The chase, said once: at the mid-grid stops the default gate visibly
+  // retreats at roughly the pace the cloud advances.
+  function drawChaseCallout(env) {
+    var g = env.gCallout; g.selectAll("*").remove();
+    if (!env.primary || (state.dk !== "-5" && state.dk !== "-8")) return;
+    // top-right corner: empty space above the null ghost's right tail
+    var fs = env.narrow ? 13 : (env.detail ? 12 : 10.5), tx = env.pw - 4;
+    var lines = ["the default threshold moves with", "the effect it is meant to detect"];
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var t = g.append("text").attr("x", tx).attr("y", 12).attr("text-anchor", "end")
+      .attr("class", "ax-note").style("font-size", fs + "px").attr("fill", C.def);
+    lines.forEach(function (ln, i) {
+      t.append("tspan").attr("x", tx).attr("dy", i === 0 ? 0 : fs + 3).text(ln);
+    });
+    // panel-colored halo so gate lines never strike through the text
+    var bb = t.node().getBBox();
+    g.insert("rect", "text").attr("x", bb.x - 6).attr("y", bb.y - 4)
+      .attr("width", bb.width + 12).attr("height", bb.height + 8)
+      .attr("fill", C.panel).attr("fill-opacity", 0.92).attr("rx", 3);
+    if (!reduce) { g.attr("opacity", 0).transition().duration(300).attr("opacity", 1); }
+    else { g.attr("opacity", 1); }
   }
   function morphHero(env, fromDk, toDk) {
     var est = state.focus, a0 = cell(est, fromDk), a1 = cell(est, toDk);
     var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduce || a0.att.length !== a1.att.length) { drawHeroLive(env, a1.att, a1.se_claimed, a1.mean_att, toDk); return; }
+    env.gCallout.selectAll("*").remove();
+    if (reduce || a0.att.length !== a1.att.length) {
+      drawHeroLive(env, a1.att, a1.se_boot_mean, a1.mean_att, toDk);
+      drawChaseCallout(env);
+      return;
+    }
     var dur = 520, n = a1.att.length;
     if (env.timer) env.timer.stop();
     env.timer = d3.timer(function (el) {
       var k = Math.min(1, el / dur), e = d3.easeCubicOut(k), att = new Array(n);
       for (var i = 0; i < n; i++) att[i] = a0.att[i] + (a1.att[i] - a0.att[i]) * e;
-      drawHeroLive(env, att, a0.se_claimed + (a1.se_claimed - a0.se_claimed) * e, a0.mean_att + (a1.mean_att - a0.mean_att) * e, toDk);
-      if (k >= 1) { env.timer.stop(); drawHeroLive(env, a1.att, a1.se_claimed, a1.mean_att, toDk); }
+      drawHeroLive(env, att, a0.se_boot_mean + (a1.se_boot_mean - a0.se_boot_mean) * e, a0.mean_att + (a1.mean_att - a0.mean_att) * e, toDk);
+      if (k >= 1) { env.timer.stop(); drawHeroLive(env, a1.att, a1.se_boot_mean, a1.mean_att, toDk); drawChaseCallout(env); }
     });
   }
 
-  // SE panel: the inflation ratio is the hero, the spread bars support it
+  // SE panel: the flat jackknife ratio against the climbing default ratio,
+  // across the five effect sizes. The most shareable image on the page.
   var seInline = null;
   function buildSEEnv(svg, W, H, detail) {
     svg.selectAll("*").remove();
-    var M = { t: 10, r: 18, b: 14, l: 22 };
+    var M = { t: 12, r: 20, b: 36, l: 34 };
     var env = { svg: svg, W: W, H: H, M: M, detail: detail };
     env.pw = W - M.l - M.r; env.ph = H - M.t - M.b;
-    env.x = d3.scaleLinear().range([0, env.pw]);
-    env.g = svg.append("g").attr("transform", "translate(" + M.l + "," + M.t + ")");
+    env.x = d3.scaleLinear().domain([0, 0.12]).range([0, env.pw]);
+    env.y = d3.scaleLinear().domain([0, 7]).range([env.ph, 0]);
+    var root = svg.append("g").attr("transform", "translate(" + M.l + "," + M.t + ")");
+    env.gStatic = root.append("g");
+    env.gLive = root.append("g");
     return env;
   }
-  function drawSE(env, c) {
-    var g = env.g; g.selectAll("*").remove();
-    c = c || focusCell();
-    var maxC = c.se_true;
-    DKEYS.forEach(function (dk) { maxC = Math.max(maxC, cell(state.focus, dk).se_claimed); });
-    env.x.domain([0, maxC * 1.04]);
-    var fs = env.detail ? 13 : 12, sub = env.detail ? 11 : 10, barH = env.detail ? 20 : 16;
-    var numFS = env.detail ? 84 : 66, numY = numFS * 0.82;
-    var word = c.se_ratio > 1.05 ? "too wide" : (c.se_ratio < 0.95 ? "too narrow" : "about right");
-    g.append("text").attr("x", 0).attr("y", numY)
-      .attr("class", "ax-label").style("font-size", numFS + "px").style("font-weight", "500")
-      .attr("fill", C.jack).text(c.se_ratio.toFixed(1) + "×");
-    g.append("text").attr("x", env.pw).attr("y", numY - numFS * 0.34).attr("text-anchor", "end")
-      .attr("class", "ax-note").style("font-size", (sub + 2) + "px").attr("fill", C.inkSoft)
-      .text("claimed SE ÷ true sampling spread");
-    g.append("text").attr("x", env.pw).attr("y", numY - numFS * 0.34 + 18).attr("text-anchor", "end")
-      .attr("class", "ax-note").style("font-size", (sub + 2) + "px").attr("fill", C.jack).text(word);
-    var claimedSub = state.focus === "multisynth" ? "mean jackknife standard error" : "mean reported standard error";
-    var rows = [
-      { lab: "claimed", sub: claimedSub, val: c.se_claimed, col: C.jack, top: numFS + 12 },
-      { lab: "true", sub: "standard deviation of the estimates", val: c.se_true, col: C.cloud, top: numFS + 12 + (env.detail ? 62 : 52) }
-    ];
-    g.append("line").attr("x1", env.x(c.se_true)).attr("x2", env.x(c.se_true)).attr("y1", rows[0].top)
-      .attr("y2", rows[1].top + barH + 18).attr("stroke", C.cloud).attr("stroke-width", 1).attr("stroke-dasharray", "2 3").attr("opacity", 0.45);
-    rows.forEach(function (r) {
-      g.append("text").attr("x", 0).attr("y", r.top + 11).attr("class", "ax-label").style("font-size", fs + "px").attr("fill", C.ink).text(r.lab);
-      g.append("text").attr("x", 64).attr("y", r.top + 11).attr("class", "ax-note").style("font-size", sub + "px").attr("fill", C.inkFaint).text(r.sub);
-      var by = r.top + 16;
-      g.append("rect").attr("x", 0).attr("y", by).attr("width", Math.max(1, env.x(r.val))).attr("height", barH).attr("rx", 2)
-        .attr("fill", r.col).attr("opacity", r.lab === "claimed" ? 0.32 : 0.85);
-      g.append("rect").attr("x", env.x(r.val) - 1.5).attr("y", by - 3).attr("width", 2.5).attr("height", barH + 6).attr("fill", r.col);
-      g.append("text").attr("x", env.x(r.val) + 8).attr("y", by + barH - 3).attr("class", "ax-label").style("font-size", (fs - 0.5) + "px").attr("fill", r.col).text(r.val.toFixed(4));
+  function seRatios(dk) {
+    var c = cell(state.focus, dk);
+    return { boot: c.se_boot_ratio, jack: c.se_jack_ratio };
+  }
+  function drawSE(env) {
+    var g = env.gStatic; g.selectAll("*").remove();
+    var primary = DATA.estimators[state.focus].primary;
+    var fs = env.detail ? 12 : 11;
+    var line = d3.line()
+      .x(function (dk) { return env.x(Math.abs(+dk) / 100); })
+      .y(function (dk) { return env.y(seRatios(dk).boot); })
+      .curve(d3.curveMonotoneX);
+    var ax = d3.axisBottom(env.x).tickValues([0, 0.02, 0.05, 0.08, 0.12])
+      .tickFormat(function (d) { return d === 0 ? "0" : "−" + Math.round(d * 100) + "%"; }).tickSize(4);
+    var gx = g.append("g").attr("transform", "translate(0," + env.ph + ")").call(ax);
+    gx.selectAll("text").attr("class", "tick").style("font-size", fs + "px");
+    gx.select(".domain").attr("stroke", C.rule);
+    var ay = d3.axisLeft(env.y).tickValues([1, 2, 4, 6]).tickFormat(function (d) { return d + "×"; }).tickSize(4);
+    var gy = g.append("g").call(ay);
+    gy.selectAll("text").attr("class", "tick").style("font-size", fs + "px");
+    gy.select(".domain").attr("stroke", C.rule);
+    g.append("text").attr("class", "ax-label").attr("x", env.pw).attr("y", env.ph + 32)
+      .attr("text-anchor", "end").style("font-size", fs + "px").text("true effect");
+    // where a well-calibrated SE sits
+    g.append("line").attr("x1", 0).attr("x2", env.pw).attr("y1", env.y(1)).attr("y2", env.y(1))
+      .attr("stroke", C.inkFaint).attr("stroke-width", 1).attr("stroke-dasharray", "3 3");
+    g.append("text").attr("x", env.pw - 2).attr("y", env.y(1) + 14).attr("text-anchor", "end")
+      .attr("class", "ax-note").style("font-size", (fs - 1) + "px").attr("fill", C.inkFaint)
+      .text("a well-calibrated SE sits here (1×)");
+    // default / own-SE series
+    g.append("path").attr("d", line(DKEYS)).attr("fill", "none").attr("stroke", C.def).attr("stroke-width", 2.4);
+    DKEYS.forEach(function (dk) {
+      g.append("circle").attr("cx", env.x(Math.abs(+dk) / 100)).attr("cy", env.y(seRatios(dk).boot)).attr("r", 3.2).attr("fill", C.def);
     });
+    var lastBoot = seRatios("-12").boot;
+    g.append("text").attr("x", env.x(0.12) - 8).attr("y", env.y(lastBoot) - 9).attr("text-anchor", "end")
+      .attr("class", "ax-note").style("font-size", fs + "px").attr("fill", C.def)
+      .text(primary ? "default (wild bootstrap)" : "reported SE");
+    // jackknife series (primary only): exactly flat
+    if (primary) {
+      var jline = d3.line()
+        .x(function (dk) { return env.x(Math.abs(+dk) / 100); })
+        .y(function (dk) { return env.y(seRatios(dk).jack); })
+        .curve(d3.curveMonotoneX);
+      g.append("path").attr("d", jline(DKEYS)).attr("fill", "none").attr("stroke", C.jack).attr("stroke-width", 2.4);
+      DKEYS.forEach(function (dk) {
+        g.append("circle").attr("cx", env.x(Math.abs(+dk) / 100)).attr("cy", env.y(seRatios(dk).jack)).attr("r", 3.2).attr("fill", C.jack);
+      });
+      g.append("text").attr("x", env.x(0.12) - 8).attr("y", env.y(seRatios("-12").jack) - 10).attr("text-anchor", "end")
+        .attr("class", "ax-note").style("font-size", fs + "px").attr("fill", C.jack).text("jackknife");
+    }
+    drawSELive(env);
+  }
+  function drawSELive(env, live) {
+    var g = env.gLive; g.selectAll("*").remove();
+    var primary = DATA.estimators[state.focus].primary;
+    if (!live) {
+      var r = seRatios(state.dk);
+      live = { xAbs: Math.abs(+state.dk) / 100, boot: r.boot, jack: r.jack };
+    }
+    var mx = env.x(live.xAbs);
+    g.append("line").attr("x1", mx).attr("x2", mx).attr("y1", 0).attr("y2", env.ph)
+      .attr("stroke", C.ink).attr("stroke-width", 1).attr("opacity", 0.45);
+    g.append("circle").attr("cx", mx).attr("cy", -2).attr("r", 3).attr("fill", C.ink);
+    // live numerals, top-left (the plot's empty corner)
+    var numFS = env.detail ? 34 : 27, labFS = env.detail ? 12 : 10.5;
+    g.append("text").attr("x", 6).attr("y", numFS).attr("class", "ax-label")
+      .style("font-size", numFS + "px").style("font-weight", "500").attr("fill", C.def)
+      .text(live.boot.toFixed(1) + "×");
+    g.append("text").attr("x", 6).attr("y", numFS + labFS + 3).attr("class", "ax-note")
+      .style("font-size", labFS + "px").attr("fill", C.def)
+      .text(primary ? "default SE ÷ true spread" : "reported SE ÷ true spread");
+    if (primary) {
+      var y2 = numFS + labFS + 3;
+      g.append("text").attr("x", 6).attr("y", y2 + numFS + 6).attr("class", "ax-label")
+        .style("font-size", numFS + "px").style("font-weight", "500").attr("fill", C.jack)
+        .text(live.jack.toFixed(2) + "×");
+      g.append("text").attr("x", 6).attr("y", y2 + numFS + labFS + 9).attr("class", "ax-note")
+        .style("font-size", labFS + "px").attr("fill", C.jack)
+        .text("jackknife SE ÷ true spread");
+    }
   }
   function morphSE(env, fromDk, toDk) {
-    var a0 = cell(state.focus, fromDk), a1 = cell(state.focus, toDk);
+    var r0 = seRatios(fromDk), r1 = seRatios(toDk);
+    var x0 = Math.abs(+fromDk) / 100, x1 = Math.abs(+toDk) / 100;
     var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduce) { drawSE(env, a1); return; }
+    if (reduce) { drawSELive(env); return; }
     var dur = 520;
     if (env.timer) env.timer.stop();
     env.timer = d3.timer(function (el) {
       var k = Math.min(1, el / dur), e = d3.easeCubicOut(k);
-      drawSE(env, {
-        se_claimed: a0.se_claimed + (a1.se_claimed - a0.se_claimed) * e,
-        se_true: a1.se_true,
-        se_ratio: a0.se_ratio + (a1.se_ratio - a0.se_ratio) * e
+      drawSELive(env, {
+        xAbs: x0 + (x1 - x0) * e,
+        boot: r0.boot + (r1.boot - r0.boot) * e,
+        jack: r0.jack != null && r1.jack != null ? r0.jack + (r1.jack - r0.jack) * e : null
       });
-      if (k >= 1) { env.timer.stop(); drawSE(env, a1); }
+      if (k >= 1) { env.timer.stop(); drawSELive(env); }
     });
   }
 
@@ -519,11 +630,32 @@
           .text("MDE " + (Math.abs(mde) * 100).toFixed(1) + "%");
       }
     });
-    // the primary estimator's jackknife rule sits flat on the floor at every δ
+    // the primary estimator's jackknife curve: same fits, working test
+    if (state.active.multisynth) {
+      var focJ = state.focus === "multisynth";
+      g.append("path").attr("d", pcurve(env, function (k) { return cell("multisynth", k).reject_jack; }))
+        .attr("fill", "none").attr("stroke", C.jack).attr("stroke-width", focJ ? 2.4 : 1.8)
+        .attr("opacity", focJ ? 1 : 0.7);
+      if (focJ) DKEYS.forEach(function (k) {
+        g.append("circle").attr("cx", env.x(Math.abs(+k) / 100)).attr("cy", env.y(cell("multisynth", k).reject_jack)).attr("r", 2.6).attr("fill", C.jack);
+      });
+      g.append("text").attr("x", env.x(0.12) - 4).attr("y", env.y(cell("multisynth", "-12").reject_jack) + 16)
+        .attr("text-anchor", "end").attr("class", "ax-note").style("font-size", "10px").attr("fill", C.jack).text("ASCM, jackknife");
+      var mj = DATA.meta.mde_jack_delta;
+      if (mj && focJ) {
+        var mjx = env.x(Math.abs(mj));
+        g.append("line").attr("x1", mjx).attr("x2", mjx).attr("y1", env.y(0.8) - 7).attr("y2", env.y(0.8) + 7)
+          .attr("stroke", C.jack).attr("stroke-width", 2);
+        g.append("text").attr("x", mjx + 5).attr("y", env.y(0.8) + 16).attr("text-anchor", "start")
+          .attr("class", "ax-note").style("font-size", "9.5px").attr("fill", C.jack)
+          .text("MDE " + (Math.abs(mj) * 100).toFixed(1) + "%");
+      }
+    }
+    // the default rule sits flat on the floor at every δ
     // (drawn 2px above the axis so it reads as its own line, not the axis)
     g.append("path").attr("d", pcurve(env, function (k) { return cell("multisynth", k).reject_se; }, 2))
-      .attr("fill", "none").attr("stroke", C.jack).attr("stroke-width", 2.6);
-    g.append("text").attr("x", env.x(0.12)).attr("y", env.y(0.05)).attr("text-anchor", "end").attr("class", "ax-note").style("font-size", "10px").attr("fill", C.jack).text("ASCM, jackknife rule");
+      .attr("fill", "none").attr("stroke", C.def).attr("stroke-width", 2.6);
+    g.append("text").attr("x", env.x(0.12)).attr("y", env.y(0.05)).attr("text-anchor", "end").attr("class", "ax-note").style("font-size", "10px").attr("fill", C.def).text("ASCM, default rule (wild bootstrap)");
   }
   function drawPowerMarker(env) {
     var g = env.gMarker; g.selectAll("*").remove();
@@ -540,8 +672,9 @@
     el.innerHTML = "The primary estimator's smallest detectable effect is <strong>" +
       Math.abs(m.mde_delta_primary * 100).toFixed(1) + "%</strong> of per-capita ethanol, roughly <strong>" +
       m.mde_drinks_per_month.toFixed(1) + " standard drinks per adult per month</strong> at the " +
-      m.baseline_gal_ethanol_21.toFixed(2) + "-gallon baseline. Plausible substitution, " +
-      bl + " to " + br + " percent, sits well below it.";
+      m.baseline_gal_ethanol_21.toFixed(2) + "-gallon baseline. The jackknife's is <strong>" +
+      Math.abs(m.mde_jack_delta * 100).toFixed(1) + "%</strong>; the gap partly reflects its conservatism. " +
+      "Plausible substitution, " + bl + " to " + br + " percent, sits well below both.";
   }
 
   // placebo panel: the observed noise floor (Section IV in-time placebos)
@@ -608,7 +741,7 @@
         .text(s.label + "  ·  mean " + eff1(s.mean) + ", sd " + (Math.abs(s.sd) * 100).toFixed(1) + "pp");
       g.append("rect").attr("x", env.x(s.mean - 2 * s.sd)).attr("y", yc - rowH * 0.16)
         .attr("width", env.x(s.mean + 2 * s.sd) - env.x(s.mean - 2 * s.sd)).attr("height", rowH * 0.32).attr("rx", 2)
-        .attr("fill", C.jack).attr("opacity", isFocus ? 0.18 : 0.08);
+        .attr("fill", C.def).attr("opacity", isFocus ? 0.18 : 0.08);
       g.append("line").attr("x1", env.x(s.mean)).attr("x2", env.x(s.mean)).attr("y1", yc - rowH * 0.2).attr("y2", yc + rowH * 0.2)
         .attr("stroke", C.ink).attr("stroke-width", 1.4).attr("opacity", isFocus ? 0.9 : 0.5);
       s.values.forEach(function (v, j) {
@@ -685,7 +818,7 @@
     function bandAndTick(center, half) {
       g.append("rect").attr("x", env.x(center - half)).attr("y", yc - bandH / 2)
         .attr("width", env.x(center + half) - env.x(center - half)).attr("height", bandH).attr("rx", 3)
-        .attr("fill", C.jack).attr("opacity", 0.15);
+        .attr("fill", C.def).attr("opacity", 0.15);
       g.append("line").attr("x1", env.x(center)).attr("x2", env.x(center))
         .attr("y1", yc - bandH * 0.72).attr("y2", yc + bandH * 0.72)
         .attr("stroke", C.ink).attr("stroke-width", 1.4).attr("opacity", 0.8);
@@ -737,9 +870,14 @@
         .attr("fill", C.inkFaint)
         .text("single-state backdating was not run for " + DATA.estimators[state.focus].short + "; its pooled placebo is shown");
     } else if (state.focus === "multisynth") {
-      g.append("text").attr("x", 0).attr("y", env.ph + 36).attr("class", "ax-note").style("font-size", sub + "px")
+      var pj = DATA.placebo_jack;
+      g.append("text").attr("x", 0).attr("y", env.ph + 34).attr("class", "ax-note").style("font-size", sub + "px")
         .attr("fill", C.inkFaint)
-        .text("classic SCM is the single-unit analogue of the partially-pooled ASCM");
+        .text("classic SCM is the single-unit analogue of the ASCM");
+      g.append("text").attr("x", 0).attr("y", env.ph + 46).attr("class", "ax-note").style("font-size", sub + "px")
+        .attr("fill", C.inkFaint)
+        .text("pooled fakes under the jackknife: t = " + pj["2009"].t_jack.toFixed(2).replace("-", "−") +
+          " (2009), " + pj["2007"].t_jack.toFixed(2).replace("-", "−") + " (2007), no rejections");
     }
   }
 
@@ -761,21 +899,43 @@
 
   function drawReading() {
     var c = focusCell(), est = DATA.estimators[state.focus], el = document.getElementById("reading");
-    // "jackknife" only for the primary estimator (its actual inference); the rest
-    // use neutral terms. The over-rejects clause mirrors the SE panel's verdict.
-    var testName = est.primary ? "jackknife test" : "standard-error test";
-    var seName = est.primary ? "jackknife standard error" : "reported standard error";
-    var already = est.primary ? "already " : "";
-    var tail = cell(state.focus, "0").reject_se > OVERSIZE ? ": too narrow, so the test over-rejects." : ".";
-    if (state.dk === "0") {
-      el.innerHTML = "The injected effect is zero. " + est.label + " returns a mean estimate of <strong>" + eff1(c.mean_att) +
-        "</strong>. The " + testName + " rejects <strong>" + pct1(c.reject_se) + "</strong> of draws and the calibrated test rejects <strong>" +
-        pct1(c.reject_ri) + "</strong>. The " + seName + " is " + already + "<strong>" + c.se_ratio.toFixed(1) + "×</strong> the true sampling dispersion" + tail;
+    var lead = state.dk === "0"
+      ? "The injected effect is zero. " + est.label + " returns a mean estimate of <strong>" + eff1(c.mean_att) + "</strong>. "
+      : "The injected effect is <strong>" + effI(dkDec(state.dk)) + "</strong>. " + est.label + " recovers a mean estimate of <strong>" + eff1(c.mean_att) + "</strong>. ";
+    if (est.primary) {
+      el.innerHTML = lead +
+        "The default test (a wild bootstrap) rejects <strong>" + pct1(c.reject_se) + "</strong> of draws, the jackknife <strong>" +
+        pct1(c.reject_jack) + "</strong>, the calibrated test <strong>" + pct1(c.reject_ri) + "</strong>. The default standard error is <strong>" +
+        c.se_boot_ratio.toFixed(1) + "×</strong> the true sampling dispersion; the jackknife's is a flat <strong>" +
+        c.se_jack_ratio.toFixed(2) + "×</strong>.";
     } else {
-      el.innerHTML = "The injected effect is <strong>" + effI(dkDec(state.dk)) + "</strong>. " + est.label + " recovers a mean estimate of <strong>" +
-        eff1(c.mean_att) + "</strong>. The " + testName + " rejects <strong>" + pct1(c.reject_se) + "</strong> of draws. The calibrated test rejects <strong>" +
-        pct1(c.reject_ri) + "</strong>. The " + seName + " is <strong>" + c.se_ratio.toFixed(1) + "×</strong> the true spread" + tail;
+      // neutral terms for the alternatives; the over-rejects clause mirrors the SE panel's verdict
+      var tail = cell(state.focus, "0").reject_se > OVERSIZE ? ": too narrow, so the test over-rejects." : ".";
+      el.innerHTML = lead +
+        "The standard-error test rejects <strong>" + pct1(c.reject_se) + "</strong> of draws and the calibrated test rejects <strong>" +
+        pct1(c.reject_ri) + "</strong>. The reported standard error is <strong>" + c.se_boot_ratio.toFixed(1) +
+        "×</strong> the true sampling dispersion" + tail;
     }
+  }
+
+  // The corrected narrative, drawn once; every number formatted from power.json.
+  function drawReadingStatic() {
+    var el = document.getElementById("reading-static");
+    if (!el) return;
+    var m = DATA.meta, rd = DATA.real_data, pj = DATA.placebo_jack;
+    var ms0 = cell("multisynth", "0"), ms12 = cell("multisynth", "-12");
+    var p = function (h) { var q = mk("p"); q.innerHTML = h; el.appendChild(q); };
+    el.innerHTML = "";
+    p("The default standard error is a wild bootstrap, and it grows from " +
+      ms0.se_boot_ratio.toFixed(1) + "× the true spread at δ = 0 to " + ms12.se_boot_ratio.toFixed(1) +
+      "× at −12%, so the default test never rejects. The only hint in the software's output is a generic conservatism warning.");
+    p("The jackknife on the same fits stays flat at " + ms0.se_jack_ratio.toFixed(2) + "×, holds size (" +
+      pct1(ms0.reject_jack) + " at zero), reaches 80% power at " + Math.abs(m.mde_jack_delta * 100).toFixed(1) +
+      "%, and stays quiet on placebo data (t = " + pj["2009"].t_jack.toFixed(2).replace("-", "−") + ", " +
+      pj["2007"].t_jack.toFixed(2).replace("-", "−") + ").");
+    p("The calibrated test is the benchmark: exact 5% size, MDE " + Math.abs(m.mde_delta_primary * 100).toFixed(1) +
+      "%. No rule can see the low single digits, which is the paper's headline. Real data: <strong>" + eff1(rd.pct) +
+      "</strong>, a null under every rule (t = " + rd.t_boot.toFixed(2) + " default, " + rd.t_jack.toFixed(2) + " jackknife).");
   }
 
   // modal
@@ -799,22 +959,28 @@
     modalSvg.selectAll("*").remove();
     var cap = document.getElementById("modal-cap"); cap.innerHTML = "";
     if (kind === "hero") {
-      var hw = NARROW_MQ.matches ? 520 : 900, hh = NARROW_MQ.matches ? 600 : 520;
+      var hw = NARROW_MQ.matches ? 520 : 900, hh = NARROW_MQ.matches ? 620 : 540;
       modalSvg.attr("viewBox", "0 0 " + hw + " " + hh);
       var e = buildHeroEnv(modalSvg, hw, hh, true);
-      drawHeroFrame(e); drawHeroGhost(e); drawHeroLive(e, focusCell().att, focusCell().se_claimed, focusCell().mean_att);
+      drawHeroFrame(e); drawHeroGhost(e); drawHeroLive(e, focusCell().att, focusCell().se_boot_mean, focusCell().mean_att);
+      drawChaseCallout(e);
       cap.appendChild(legendNode());
-      cap.appendChild(note("At " + effI(dkDec(state.dk)) + " the estimates from " + DATA.estimators[state.focus].label +
-        " center near the injected effect. The jackknife threshold sits far out at ±1.96 times the jackknife standard error, so the estimates do not reach it."));
+      cap.appendChild(note(DATA.estimators[state.focus].primary
+        ? ("At " + effI(dkDec(state.dk)) + " the estimates from " + DATA.estimators[state.focus].label +
+           " center near the injected effect. The jackknife and calibrated thresholds stand still and the estimates cross them; the default threshold, ±1.96 times the mean wild-bootstrap standard error, moves outward with the effect, so the estimates never reach it.")
+        : ("At " + effI(dkDec(state.dk)) + " the estimates from " + DATA.estimators[state.focus].label +
+           " center near the injected effect. The shaded region is ±1.96 times the estimator's mean reported standard error; the dashed lines are the calibrated threshold.")));
     } else if (kind === "se") {
       modalSvg.attr("viewBox", "0 0 900 300");
       drawSE(buildSEEnv(modalSvg, 900, 300, true));
-      cap.appendChild(note("The ratio divides the estimator's mean reported standard error by the standard deviation of the point estimates across draws. " + seVerdict()));
+      cap.appendChild(note("Each ratio divides a mean standard error by the standard deviation of the point estimates across draws. " + seVerdict()));
     } else if (kind === "placebo") {
       modalSvg.attr("viewBox", "0 0 900 520");
       var q = buildPlaceboEnv(modalSvg, 900, 520, true);
       drawPlaceboStatic(q); drawPlaceboMarker(q);
-      cap.appendChild(note("Gray points are fake treatment effects estimated at every feasible backdated adoption year for the clean-fit states, using only pre-treatment data. Bands mark the mean and ±2 SD of each method's fake distribution; diamonds are the real estimates. The dashed line marks a true effect of the current δ: effects in the low single digits sit inside the noise the design produces when nothing happened."));
+      var pjm = DATA.placebo_jack;
+      cap.appendChild(note("Gray points are fake treatment effects estimated at every feasible backdated adoption year for the clean-fit states, using only pre-treatment data. Bands mark the mean and ±2 SD of each method's fake distribution; diamonds are the real estimates. The dashed line marks a true effect of the current δ: effects in the low single digits sit inside the noise the design produces when nothing happened. Under the jackknife the pooled fake effects have t = " +
+        pjm["2009"].t_jack.toFixed(2).replace("-", "−") + " (2009) and " + pjm["2007"].t_jack.toFixed(2).replace("-", "−") + " (2007): the working test also finds nothing where nothing happened."));
     } else {
       modalSvg.attr("viewBox", "0 0 760 520");
       var p = buildPowerEnv(modalSvg, 760, 520, true);
@@ -825,8 +991,12 @@
   }
   function closeModal() { modal.hidden = true; }
   function legendNode() {
+    var primary = DATA.estimators[state.focus].primary;
+    var items = [["lg-live", "estimates at current δ"], ["lg-null", "null distribution (δ = 0)"], ["lg-cal", "calibrated threshold"]];
+    if (primary) items.push(["lg-jack", "jackknife threshold"]);
+    items.push(["lg-def", primary ? "default region (wild bootstrap)" : "reported-SE region"]);
     var d = mk("div"); d.className = "cap-legend";
-    [["lg-live", "estimates at current δ"], ["lg-null", "null distribution (δ = 0)"], ["lg-cal", "calibrated region"], ["lg-jack", "jackknife region"]].forEach(function (it) {
+    items.forEach(function (it) {
       var s = mk("span"); s.className = "lg-item"; var sw = mk("span"); sw.className = "lg-sw " + it[0]; var tx = mk("span"); tx.textContent = it[1];
       s.appendChild(sw); s.appendChild(tx); d.appendChild(s);
     });
@@ -841,9 +1011,14 @@
         (e.mde_ri_drinks ? " ≈ " + e.mde_ri_drinks.toFixed(1) + " drinks/mo" : "") + ")" : "");
       s.appendChild(sw); s.appendChild(tx); d.appendChild(s);
     });
+    var sj = mk("span"); sj.className = "lg-item";
+    var swj = mk("span"); swj.className = "lg-sw"; swj.style.background = C.jack;
+    var txj = mk("span"); txj.textContent = "ASCM, jackknife rule (MDE " +
+      (Math.abs(DATA.meta.mde_jack_delta) * 100).toFixed(1) + "%; the gap to the calibrated rule partly reflects its conservatism)";
+    sj.appendChild(swj); sj.appendChild(txj); d.appendChild(sj);
     var s2 = mk("span"); s2.className = "lg-item";
-    var sw2 = mk("span"); sw2.className = "lg-sw"; sw2.style.background = C.jack;
-    var tx2 = mk("span"); tx2.textContent = "ASCM, jackknife rule (flat at zero)";
+    var sw2 = mk("span"); sw2.className = "lg-sw"; sw2.style.background = C.def;
+    var tx2 = mk("span"); tx2.textContent = "ASCM, default rule (wild bootstrap; flat at zero)";
     s2.appendChild(sw2); s2.appendChild(tx2); d.appendChild(s2);
     return d;
   }
@@ -869,9 +1044,10 @@
   // rebuild the hero ladder when the narrow breakpoint flips
   NARROW_MQ.addEventListener("change", function () {
     if (!DATA || !heroInline) return;
-    heroInline = buildHeroEnv(d3.select("#hero"), 680, 408, false);
+    heroInline = buildHeroEnv(d3.select("#hero"), 680, 424, false);
     drawHeroFrame(heroInline); drawHeroGhost(heroInline);
-    drawHeroLive(heroInline, focusCell().att, focusCell().se_claimed, focusCell().mean_att);
+    drawHeroLive(heroInline, focusCell().att, focusCell().se_boot_mean, focusCell().mean_att);
+    drawChaseCallout(heroInline);
   });
 
 })();
