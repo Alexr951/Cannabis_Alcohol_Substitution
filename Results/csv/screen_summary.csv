@@ -1,0 +1,2 @@
+n_power_draws,n_power_affected,share_power_affected,n_ri_affected,share_ri_affected,n_fail_cells,n_donor_t0_cells,total_wall_min
+400,344,0.86,429,0.858,26,90,18.4
