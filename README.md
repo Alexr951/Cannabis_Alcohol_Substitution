@@ -45,8 +45,8 @@ run_all.R + R/01..10         estimation engine (cached): sample rules, six estim
 R/11_power_jackknife.R       standalone: reruns the primary estimator's power draws
                              with paired default-bootstrap and jackknife SEs and
                              builds the three-rule comparison (~22 min cold)
-make_jackknife_fig_memo.py   appendix figure and Results/JACKKNIFE_MEMO.md from the
-                             three-rule CSVs
+Results/inference_outputs.py appendix figure, Results/JACKKNIFE_MEMO.md, and the
+                             paper's generated macro fragments from those CSVs
 Results/csv/                 tidy results (every paper number traces here)
 Results/cache/               RDS caches (delete for a cold run; ~70 min on 6 cores)
 Results/figures/             all figures used in the paper
@@ -66,7 +66,7 @@ Python↔R port check, all figures, the results memo, and the paper table fragme
 Python dependencies: `pip install -r requirements.txt`. All randomness is seeded
 (`SEED = 20260524`); step runtimes are logged to `Results/runtimes.csv`. The three-rule
 inference comparison is a separate step: `Rscript R/11_power_jackknife.R` followed by
-`python make_jackknife_fig_memo.py`. It asserts that its paired draws reproduce the
+`python Results/inference_outputs.py`. It asserts that its paired draws reproduce the
 committed `power_draws.csv` exactly before writing anything.
 
 The paper's LaTeX source is kept outside this repository, but the paper is fully
