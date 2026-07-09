@@ -22,17 +22,26 @@ below the detection limit of every estimator and every rejection rule considered
 
 ## Interactive dashboard
 
-**Live at <https://alexr951.github.io/Cannabis_Alcohol_Substitution/>.** A single-page
-companion to the power analysis: one slider moves the true substitution effect δ across
-the five simulated sizes (0 to −12%) while the sampling distribution, the standard-error
-inflation ratio, the backdated-placebo noise floor, and the power curves update. The
-page is a pure replay of the committed results in `Results/csv/`; nothing is estimated
-in the browser. `dashboard/prep/build_dashboard_data.py` packs the result CSVs into
-`dashboard/public/data/power.json` (with self-checks against the committed diagnostics),
-and the front end is vanilla JavaScript and D3 with no build step. Deployment is
-automatic: `.github/workflows/deploy-pages.yml` publishes `dashboard/public/` to GitHub
-Pages on every push to `main`. To run it locally, serve the folder with
-`python -m http.server` from `dashboard/public`.
+**Live at <https://alexr951.github.io/Cannabis_Alcohol_Substitution/>.** Two linked
+pages mirroring the paper's two contributions. **Findings** (`index.html`) covers the
+substitution question: the six-estimator forest of pooled nulls with the joint RI
+p-value, the backdated-placebo noise floor, and the power section, where a slider moves
+the true effect δ across the five simulated sizes (0 to −12%) driving the sampling
+distribution and the calibrated power curves, ending in the rejection-rate table whose
+all-zero default-bootstrap column links to the second page. **Mechanism**
+(`mechanism.html`) covers the inference failure: the replicate-variance formula, the
+SE-inflation chart (1.7×→6.5× against the jackknife's flat 1.27×), the per-draw scatter
+of squared SE against squared estimate with the prep-computed fitted slope, the bounded
+t-statistic view, and the three-rule power comparison. Both pages are a pure replay of
+the committed results in `Results/csv/`; nothing is estimated in the browser.
+`dashboard/prep/build_dashboard_data.py` packs the result CSVs into
+`dashboard/public/data/findings.json` and `mechanism.json` (with self-checks against the
+committed diagnostics and a generated-from commit stamp shown in the footers), and the
+front end is vanilla JavaScript and D3 with no build step. δ carries across pages via
+`?delta=`; old single-page `#` deep links still resolve. Deployment is automatic:
+`.github/workflows/deploy-pages.yml` publishes `dashboard/public/` to GitHub Pages on
+every push to `main`. To run locally, serve with `python -m http.server` from
+`dashboard/public`.
 
 ## Pipeline (hybrid Python + R)
 
