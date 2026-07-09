@@ -143,6 +143,8 @@ def main():
     M.append(macro('caGapLo', pct(ca['gap_lo'].min())))
     ma = sc[sc['state'] == 'Massachusetts']
     M.append(macro('maGap', pct(ma['gap'].mean())))
+    M.append(macro('maGapLo', f3(ma['gap_lo'].min())))
+    M.append(macro('maGapHi', f3(ma['gap_hi'].max())))
     # power
     M.append(macro('sizeBootDefault', f"{pw_ms.loc[0.0, 'reject_se'] * 100:.1f}"))
     M.append(macro('powRiTwo', f"{pw_ms.loc[-0.02, 'reject_ri'] * 100:.0f}"))
@@ -352,7 +354,11 @@ def main():
         mrow = mde_e.loc[e]
         mde_s = ('---' if pd.isna(mrow['mde_ri'])
                  else f"{abs(mrow['mde_ri']) * 100:.1f}\\%")
-        lines.append(f"{EST_NAMES[e]} & {rej(sub.loc[0.0, 'reject_se'])} & "
+        # primary size = jackknife (the reported inference); alternatives keep
+        # their native SE tests
+        size0 = (ms3.loc[0.0, 'reject_jack'] if e == 'multisynth'
+                 else sub.loc[0.0, 'reject_se'])
+        lines.append(f"{EST_NAMES[e]} & {rej(size0)} & "
                      f"{rej(sub.loc[-0.02, 'reject_ri'])} & "
                      f"{rej(sub.loc[-0.05, 'reject_ri'])} & "
                      f"{rej(sub.loc[-0.08, 'reject_ri'])} & "
