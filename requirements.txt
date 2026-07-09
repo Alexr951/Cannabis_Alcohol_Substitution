@@ -1,12 +1,14 @@
 # Cannabis-Alcohol ASCM paper: Python side, pinned to the environment used to
 # produce all results. Python 3.13.5 (Anaconda). Install into a fresh env, then
 # Restart & Run All the notebook. (Estimation runs in R; see R/00_setup.R.)
-numpy==2.4.2
+# Also covers dashboard/prep/build_dashboard_data.py and
+# Results/inference_outputs.py (figures, memo, and paper macro fragments).
+numpy==2.2.6
 pandas==2.3.3
 scipy==1.15.3
 matplotlib==3.10.7
 
 # Notebook execution
-jupyter
+jupyter==1.1.1
 ipykernel==6.29.5
 nbconvert==7.16.6
