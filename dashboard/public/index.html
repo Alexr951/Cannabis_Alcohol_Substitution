@@ -3,180 +3,138 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Detecting Cannabis–Alcohol Substitution: power dashboard</title>
+<title>Detecting Cannabis–Alcohol Substitution: results dashboard</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <link rel="icon" type="image/png" href="favicon.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=4" />
+<link rel="stylesheet" href="styles.css?v=5" />
 </head>
 <body>
 <main class="wrap" id="app" aria-busy="true">
 
   <header class="masthead">
-    <p class="eyebrow">A companion to the working paper</p>
-    <h1>The estimator sees the effect.<br />The default test never fires.</h1>
-    <p class="dek">
-      This is the power simulation behind the paper on recreational cannabis
-      legalization and state-level alcohol sales, replayed under three
-      rejection rules: the package default (a wild bootstrap, what
-      <code>summary()</code> returns as conventionally run), a jackknife on
-      the same fits, and a calibrated randomization test. The one control is
-      the true substitution effect <span class="sym">δ</span>. Move it and
-      watch which tests fire.
-    </p>
+    <p class="eyebrow">Companion to the paper — every value replays a committed results file</p>
+    <h1>Six estimators find nothing.<br />This page asks what they could have found.</h1>
+    <p class="dek">Recreational cannabis retail and state-level alcohol sales,
+      2000–2019: pooled estimates from six estimators, the noise the design
+      produces when nothing happened, and the effect sizes the design could
+      actually detect.</p>
+    <div class="statchips" id="statchips"></div>
+    <div class="est-chips" id="est-chips" role="group" aria-label="Highlight an estimator"></div>
   </header>
 
-  <!-- Master control -->
-  <section class="control" aria-label="Master control">
-    <div class="control-head">
-      <label id="slider-label" for="slider">True substitution effect&nbsp;&nbsp;<span class="sym">δ</span></label>
-      <output id="delta-readout" class="delta-readout" for="slider">0%</output>
+  <section class="act" id="act1" aria-label="Pooled estimates">
+    <div class="act-head">
+      <span class="act-no">1</span>
+      <div>
+        <h2>Six estimators, one null</h2>
+        <p class="act-sub">Every identification approach returns a small positive
+          null. The observed estimate sits inside the design's own null
+          distribution.</p>
+      </div>
     </div>
-    <div id="slider" class="slider" role="slider" tabindex="0"
-         aria-labelledby="slider-label" aria-valuemin="-12" aria-valuemax="0"
-         aria-valuenow="0" aria-valuetext="0 percent"></div>
-    <p class="control-note">
-      The slider stops at the five effect sizes the simulation actually ran.
-      Movement between stops is animation, not interpolated data.
-    </p>
+    <figure class="panel fig">
+      <svg id="forest" viewBox="0 0 960 520" role="img"
+           aria-label="Pooled estimates from six estimators over the randomization-inference null distribution"></svg>
+      <figcaption id="act1-cap" class="cap"></figcaption>
+    </figure>
   </section>
 
-  <div class="grid">
+  <section class="act" id="act2" aria-label="Placebo noise floor">
+    <div class="act-head">
+      <span class="act-no">2</span>
+      <div>
+        <h2>The noise floor</h2>
+        <p class="act-sub">Backdated placebos measure what each estimator finds in
+          windows where no treatment occurred.</p>
+      </div>
+    </div>
+    <div class="act2-grid">
+      <figure class="panel fig">
+        <svg id="strips" viewBox="0 0 620 460" role="img"
+             aria-label="Backdated placebo distributions by method with the real estimates overlaid"></svg>
+        <figcaption id="act2-cap" class="cap"></figcaption>
+      </figure>
+      <figure class="panel fig">
+        <svg id="pooled-fakes" viewBox="0 0 340 460" role="img"
+             aria-label="Pooled backdated placebo estimates, fake 2009 and fake 2007"></svg>
+        <figcaption id="act2b-cap" class="cap"></figcaption>
+      </figure>
+    </div>
+  </section>
 
-    <!-- LEFT: hero + SE mechanism -->
-    <div class="col-main">
-
-      <section class="panel hero-panel" aria-label="Sampling distribution">
-        <div class="panel-head">
-          <h2>Sampling distribution</h2>
-          <p class="panel-sub">
-            Per-draw point estimates for <span id="hero-est" class="est-name">the primary estimator</span>,
-            with the rejection rules on one axis.
-          </p>
+  <section class="act" id="act3" aria-label="Power simulation">
+    <div class="act-head">
+      <span class="act-no">3</span>
+      <div>
+        <h2>Drag the truth</h2>
+        <p class="act-sub">The same pseudo-treated draws at every effect size; only
+          the injected effect changes. Watch what each rejection rule can see.</p>
+      </div>
+    </div>
+    <div class="control" aria-label="Simulation controls">
+      <div class="ctl-row">
+        <label id="slider-label" for="slider">True substitution effect&nbsp;&nbsp;<span class="sym">δ</span></label>
+        <span class="ctl-readouts">
+          <output id="drinks-readout" class="drinks-readout"></output>
+          <output id="delta-readout" class="delta-readout" for="slider">0%</output>
+        </span>
+      </div>
+      <div id="slider" class="slider" role="slider" tabindex="0"
+           aria-labelledby="slider-label" aria-valuemin="-12" aria-valuemax="0"
+           aria-valuenow="0" aria-valuetext="0 percent"></div>
+      <div class="ctl-foot">
+        <p class="control-note">The slider stops at the five effect sizes the
+          simulation actually ran.</p>
+        <button id="phase-toggle" class="phase-toggle" disabled
+                title="Available at −5%, the only simulated phase-in cell">3-yr phase-in</button>
+      </div>
+    </div>
+    <div class="act3-grid">
+      <figure class="panel hero-panel">
+        <div class="fig">
+          <svg id="hero" viewBox="0 0 640 430" role="img"
+               aria-label="Sampling distribution of the selected estimator's draws at the chosen effect size"></svg>
         </div>
-        <figure class="fig">
-          <svg id="hero" viewBox="0 0 680 424" role="img"
-               aria-label="Distribution of per-draw estimates with default, jackknife, and calibrated rejection rules"></svg>
-        </figure>
-        <div id="hero-legend" class="legend" aria-hidden="true"></div>
         <div class="counters">
-          <div class="counter counter--def">
-            <span class="counter-num" id="c-def">0.0%</span>
-            <span class="counter-cap">reject · default test<br /><em id="c-def-cap">wild bootstrap, as conventionally run</em></span>
-          </div>
           <div class="counter counter--jack">
             <span class="counter-num" id="c-jack">—</span>
-            <span class="counter-cap">reject · jackknife<br /><em id="c-jack-cap">same fits, held to 1.96</em></span>
+            <span class="counter-cap">reject · jackknife<br /><em id="c-jack-cap">reported inference, primary estimator</em></span>
           </div>
           <div class="counter counter--cal">
             <span class="counter-num" id="c-cal">5.0%</span>
-            <span class="counter-cap">reject · calibrated test<br /><em>5% size by construction</em></span>
+            <span class="counter-cap">reject · calibrated randomization rule<br /><em id="c-cal-cap">5% size by construction</em></span>
           </div>
         </div>
-      </section>
-
-      <section class="panel se-panel" aria-label="Standard errors against the true spread">
-        <div class="panel-head">
-          <h2>Two standard errors, one estimator</h2>
-          <p class="panel-sub">
-            Reported standard error divided by the true sampling spread of
-            <span id="se-est" class="est-name">the primary estimator</span>,
-            at every effect size.
-            <span id="se-verdict"></span>
-          </p>
-        </div>
-        <figure class="fig">
-          <svg id="se" viewBox="0 0 680 260" role="img"
-               aria-label="Standard error to true spread ratio across effect sizes"></svg>
-        </figure>
-      </section>
-
-      <section class="panel placebo-panel" aria-label="In-time placebo evidence">
-        <div class="panel-head">
-          <h2>The observed noise floor</h2>
-          <p class="panel-sub">
-            Fake effects estimated where no treatment occurred, for
-            <span id="pla-est" class="est-name">the focused estimator</span>.
-            When the dashed marker sits inside the band, a true effect of that
-            size is indistinguishable from nothing. The diamond is the real
-            estimate. Expand for all four methods and the pooled placebo.
-          </p>
-        </div>
-        <figure class="fig">
-          <svg id="placebo" viewBox="0 0 680 300" role="img"
-               aria-label="Backdated placebo noise distribution for the focused estimator"></svg>
-        </figure>
-      </section>
-
-    </div>
-
-    <!-- RIGHT: controls + power curve + reading -->
-    <div class="col-side">
-
-      <section class="panel est-panel" aria-label="Estimators">
-        <h3 class="mini-head">Estimators</h3>
-        <p class="mini-note">Click a name to read its distribution to the left; the box
-        toggles its power curve below. MDE is the minimum detectable effect: the
-        smallest true effect the calibrated test catches 80% of the time.</p>
-        <ul id="est-list" class="est-list"></ul>
-      </section>
-
-      <section class="panel power-panel" aria-label="Power curves">
-        <div class="panel-head">
-          <h2>Power curves</h2>
-          <p class="panel-sub">Rejection rate against the true effect. The plausible
-          effects sit to the left of every estimator's detection frontier.</p>
-        </div>
-        <figure class="fig">
-          <svg id="power" viewBox="0 0 520 432" role="img"
-               aria-label="Power curves with the plausible-effect band and minimum detectable effects"></svg>
-        </figure>
-        <p id="mde-callout" class="mde-callout"></p>
-      </section>
-
-      <section class="panel read-panel" aria-label="Reading">
-        <h3 class="mini-head">Notes</h3>
         <p id="reading" class="reading" aria-live="polite"></p>
-        <div id="reading-static" class="reading reading-static"></div>
-      </section>
-
+      </figure>
+      <div class="act3-side">
+        <figure class="panel fig">
+          <svg id="power" viewBox="0 0 380 300" role="img"
+               aria-label="Power curves by estimator with the plausible-effect band"></svg>
+        </figure>
+        <figure class="panel fig">
+          <svg id="ladder" viewBox="0 0 380 250" role="img"
+               aria-label="Minimum detectable effects by estimator"></svg>
+          <figcaption id="ladder-cap" class="cap"></figcaption>
+        </figure>
+        <figure class="panel fig jk-inset">
+          <svg id="jk-ratio" viewBox="0 0 380 120" role="img"
+               aria-label="Jackknife standard error over true dispersion across effect sizes"></svg>
+          <figcaption id="jk-cap" class="cap"></figcaption>
+        </figure>
+      </div>
     </div>
-  </div>
+    <p id="closing" class="reading reading-static"></p>
+  </section>
 
-  <footer class="colophon">
-    <p>
-      Every number replays <code>Results/csv/power_*.csv</code> and
-      <code>intime_placebo_*.csv</code>, the same files the paper's tables are
-      built from. No estimation runs in the browser.
-      The plausible-effect band marks the low single digits, 1 to 4 percent. The
-      paper treats this as the relevant small-effect case rather than a point
-      estimate (Subbaraman 2016; the 12 percent scanner-data decline of Baggio,
-      Chong and Kwon 2020 is the contrasting high end).
-    </p>
-    <p>
-      The paper reports the three-rule comparison in brief (appendix
-      &ldquo;Inference Rules for the Primary Estimator&rdquo;, Figure C1);
-      this page replays the full simulation behind it, draw by draw.
-    </p>
-    <p class="packages">
-      Partially-pooled ASCM (<code>augsynth</code>; default wild bootstrap,
-      jackknife alongside) ·
-      Synthetic DiD (<code>synthdid</code>, placebo variance) ·
-      Generalized SC / IFE (<code>gsynth</code>, parametric bootstrap) ·
-      Matrix completion (<code>gsynth</code>, bootstrap) ·
-      Callaway–Sant'Anna (<code>did</code>, multiplier bootstrap) ·
-      <a href="https://github.com/Alexr951/Cannabis_Alcohol_Substitution">replication repository</a>
-    </p>
-    <p class="cite">
-      Ronczewski, A. (2026). <em>Detecting Cannabis–Alcohol Substitution in
-      Aggregate Sales Data: Statistical Power and the Limits of Small-Sample
-      Synthetic Control.</em> Working paper.
-    </p>
-  </footer>
+  <footer class="colophon" id="foot"></footer>
 
 </main>
+
+<div id="tooltip" class="tooltip" hidden></div>
 
 <div id="modal" class="modal" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
@@ -190,6 +148,9 @@
 </div>
 
 <script src="vendor/d3.v7.min.js"></script>
-<script src="app.js?v=3"></script>
+<script src="js/shared.js?v=4"></script>
+<script src="js/act1.js?v=4"></script>
+<script src="js/act2.js?v=4"></script>
+<script src="js/act3.js?v=4"></script>
 </body>
 </html>

@@ -20,17 +20,20 @@ rule considered.
 
 ## Interactive dashboard
 
-**Live at <https://alexr951.github.io/Cannabis_Alcohol_Substitution/>.** A single-page
-explorer of the power simulation: a slider moves the true effect δ across the five
-simulated sizes (0 to −12%), driving the sampling distribution, the standard-error
-comparison, the observed noise floor, and the power curves. The page is a pure replay
-of the committed results in `Results/csv/`; nothing is estimated in the browser.
-`dashboard/prep/build_dashboard_data.py` packs the result CSVs into
-`dashboard/public/data/power.json` (with self-checks against the committed
-diagnostics), and the front end is vanilla JavaScript and D3 with no build step.
-Deployment is automatic: `.github/workflows/deploy-pages.yml` publishes
-`dashboard/public/` to GitHub Pages on every push to `main`. To run locally, serve with
-`python -m http.server` from `dashboard/public`.
+**Live at <https://alexr951.github.io/Cannabis_Alcohol_Substitution/>.** A single page
+that follows the paper's arc in three acts: the six pooled estimates over the
+randomization-inference null distribution, the backdated-placebo noise floor with the
+real estimates overlaid, and the power simulation, where a slider moves the true
+effect δ across the five simulated sizes (0 to −12%), a chip row highlights any of
+the six estimators, and a toggle switches the −5% cell to its three-year phase-in
+version. The page is a pure replay of the committed results in `Results/csv/`;
+nothing is estimated in the browser. `dashboard/prep/build_dashboard_data.py` packs
+the result CSVs into `dashboard/public/data/power.json` (schema 4, with self-checks
+that recompute every shipped rate from the shipped draws), and the front end is
+vanilla JavaScript and D3 with no build step. Deployment is automatic:
+`.github/workflows/deploy-pages.yml` publishes `dashboard/public/` to GitHub Pages on
+every push to `main`. To run locally, serve with `python -m http.server` from
+`dashboard/public`.
 
 ## Pipeline (hybrid Python + R)
 

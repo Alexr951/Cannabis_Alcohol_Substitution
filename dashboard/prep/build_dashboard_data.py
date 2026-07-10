@@ -1,4 +1,4 @@
-"""Build the dashboard data file from the committed power-simulation results.
+"""Build the dashboard data file from the committed power-simulation results (schema 4).
 
 Reads the power_*.csv, intime_placebo_*.csv and primary-result files in
 Results/csv/ and writes dashboard/public/data/power.json. The dashboard replays
@@ -8,10 +8,12 @@ Run from the repository root:  python dashboard/prep/build_dashboard_data.py
 """
 import json
 import math
+import subprocess
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy import stats as sps
 
 ROOT = Path(__file__).resolve().parents[2]
 CSV = ROOT / "Results" / "csv"
@@ -27,7 +29,7 @@ SOURCES = [
     "intime_placebo_single.csv", "intime_placebo_pooled2009.csv",
     "intime_placebo_pooled2007.csv", "multisynth_overall.csv",
     "sdid_primary.csv", "gsynth_primary.csv", "cs_twfe_primary.csv",
-    "state_scm_att.csv",
+    "state_scm_att.csv", "ri_null_dist.csv", "ri_pooled.csv",
 ]
 
 # display labels
@@ -146,17 +148,12 @@ def main():
     def cell(est, delta):
         g = draws[(draws.estimator == est) & np.isclose(draws.delta, delta)].sort_values("draw")
         r = res.loc[(est, delta)]
-        boot_mean = float(g.se.mean())
         true = se_true[est]
         out = {
             "att": [sig(v) for v in g.att.tolist()],
-            "se_boot": [sig(v) for v in g.se.tolist()],
-            "reject_se": sig(float(r.reject_se)),
             "reject_ri": sig(float(r.reject_ri)),
             "mean_att": sig(float(r.mean_att)),
-            "se_boot_mean": sig(boot_mean),  # mean own/default SE at this delta
             "se_true": sig(true),            # constant true sampling dispersion
-            "se_boot_ratio": sig(boot_mean / true),
         }
         if est == PRIMARY:
             gj = draws_jack[(draws_jack.estimator == est) &
@@ -188,6 +185,8 @@ def main():
             "mde_se": sig(float(mde.loc[est, "mde_se"])) if not pd.isna(mde.loc[est, "mde_se"]) else None,
             "mde_ri_drinks": sig(float(mde.loc[est, "mde_ri_drinks"])) if not pd.isna(mde.loc[est, "mde_ri_drinks"]) else None,
             "deltas": {pct_key(d): cell(est, d) for d in deltas},
+            "size_se0": None if est == PRIMARY
+                        else sig(float(res.loc[(est, 0.0), "reject_se"])),
         }
 
     # The jackknife SE is exactly shift-invariant to the injected effect, so its
@@ -200,6 +199,17 @@ def main():
     print("jackknife self-check passed: per-draw arrays reproduce "
           "power_results_3rules.csv; SE flat across delta")
 
+    # The grid reuses the same pseudo-treated draws at every delta: per-draw
+    # differences from the delta=0 cell must be constant within each cell.
+    for est in ORDER:
+        base = np.array(estimators[est]["deltas"]["0"]["att"], dtype=float)
+        for d in deltas[1:]:
+            a = np.array(estimators[est]["deltas"][pct_key(d)]["att"], dtype=float)
+            spread = float((a - base).std())
+            assert spread < 1e-6, \
+                f"draws not paired across delta for {est} at {d}: shift sd {spread}"
+    print("pairing-across-delta self-check passed: rigid shift for all estimators")
+
     # Phase-in cell: -5% ramped over three years (final row of Table 6).
     gp = draws[(draws.estimator == "multisynth_phased")].sort_values("draw")
     rp = res.loc[("multisynth_phased", -0.05)]
@@ -208,8 +218,6 @@ def main():
         "label": "ASCM, 3-yr phase-in",
         "delta": -0.05,
         "att": [sig(v) for v in gp.att.tolist()],
-        "se_boot": [sig(v) for v in gp.se.tolist()],
-        "reject_se": sig(float(rp.reject_se)),
         "reject_jack": sig(float(rp3.reject_jack)),
         "reject_ri": sig(float(rp.reject_ri)),
         "mean_att": sig(float(rp.mean_att)),
@@ -291,6 +299,65 @@ def main():
             {"state": s, "att": sig(float(a))} for s, a in zip(g.state, g.att)
         ]
 
+    # ---- Act 1: six real pooled estimates (paper Table 3) -------------------
+    INFERENCE = {
+        "multisynth": "Jackknife",
+        "sdid": "Placebo (200 reps/cohort)",
+        "gsynth_ife": "Param. bootstrap (500)",
+        "matrix_completion": "Bootstrap (500)",
+        "callaway_santanna": "Multiplier bootstrap (999)",
+        "twfe": "Clustered by state",
+    }
+    REAL_ORDER = ORDER + ["twfe"]
+    LABELS_REAL = dict(LABELS)
+    LABELS_REAL["twfe"] = ("Two-way fixed effects", "TWFE")
+    ovj = pd.read_csv(CSV / "multisynth_overall_jack.csv").iloc[0]
+
+    def real_row(est):
+        if est == "multisynth":
+            att, se = float(ovj.att), float(ovj.se_jack)
+            ci = (float(ovj.ci_lo_jack), float(ovj.ci_hi_jack))
+        elif est == "sdid":
+            r = sdid_prim[sdid_prim.states == "Aggregate"].iloc[0]
+            att, se = float(r.tau), float(r.se)
+            ci = (att - 1.96 * se, att + 1.96 * se)
+        elif est in ("gsynth_ife", "matrix_completion"):
+            att, se = float(gs_prim.loc[est, "att"]), float(gs_prim.loc[est, "se"])
+            ci = (att - 1.96 * se, att + 1.96 * se)
+        else:
+            att, se = float(cs_prim.loc[est, "att"]), float(cs_prim.loc[est, "se"])
+            ci = (att - 1.96 * se, att + 1.96 * se)
+        # cross-file agreement with the overlay values already packed
+        assert abs(att - real_pooled[est]) < 1e-6, f"real att mismatch for {est}"
+        return {"att": sig(att), "se": sig(se), "ci_lo": sig(ci[0]),
+                "ci_hi": sig(ci[1]), "pct": sig(math.exp(att) - 1),
+                "inference": INFERENCE[est],
+                "label": LABELS_REAL[est][0], "short": LABELS_REAL[est][1],
+                "primary": est == PRIMARY}
+
+    real = {"order": REAL_ORDER, "rows": {e: real_row(e) for e in REAL_ORDER}}
+
+    # ---- Act 1: RI null distribution (R/08) ---------------------------------
+    nd = pd.read_csv(CSV / "ri_null_dist.csv")
+    rp = pd.read_csv(CSV / "ri_pooled.csv").iloc[0]
+    null_ok = nd.null_att.dropna().astype(float)
+    p_re = float((null_ok.abs() >= abs(float(rp.observed_att))).mean())
+    assert abs(p_re - float(rp.p_two_sided)) < 1e-9, \
+        f"RI p recomputed from null draws diverges: {p_re} vs {rp.p_two_sided}"
+    assert len(null_ok) == int(rp.n_draws), "RI null draw count mismatch"
+    ri_null = {"values": [sig(x) for x in null_ok.tolist()],
+               "observed": sig(float(rp.observed_att)),
+               "p": sig(float(rp.p_two_sided)), "n_draws": int(rp.n_draws)}
+
+    # ---- Act 3: jackknife size at delta = 0, Clopper-Pearson ---------------
+    n0 = int(res3.loc[(PRIMARY, 0.0), "n_ok"])
+    k0 = int(round(float(res3.loc[(PRIMARY, 0.0), "reject_jack"]) * n0))
+    size_jack = {
+        "size": sig(k0 / n0),
+        "lo": sig(float(sps.beta.ppf(0.025, k0, n0 - k0 + 1)) if k0 > 0 else 0.0),
+        "hi": sig(float(sps.beta.ppf(0.975, k0 + 1, n0 - k0)) if k0 < n0 else 1.0),
+    }
+
     placebo = {
         "single_order": PLACEBO_ORDER,
         "single": placebo_single,
@@ -303,36 +370,39 @@ def main():
                  "points; clean-fit states only."),
     }
 
-    # Primary real-data estimate under both standard errors.
-    ovj = pd.read_csv(CSV / "multisynth_overall_jack.csv").iloc[0]
+    # Fold the primary's jackknife SE/t into the pooled placebo entries
+    # (replaces the old separate placebo_jack top-level block).
+    ipj = pd.read_csv(CSV / "intime_pooled_jack.csv").set_index("fake_t0")
+    for yr, key in ((2009, "pooled2009"), (2007, "pooled2007")):
+        assert abs(placebo_pooled[key]["multisynth"]["att"]
+                   - float(ipj.loc[yr, "att"])) < 1e-6, \
+            f"pooled{yr} att mismatch vs intime_pooled_jack.csv"
+        placebo_pooled[key]["multisynth"]["se_jack"] = sig(float(ipj.loc[yr, "se_jack"]))
+        placebo_pooled[key]["multisynth"]["t_jack"] = sig(float(ipj.loc[yr, "t_jack"]))
+
+    # Primary real-data estimate (jackknife only).
     real_data = {
         "att": sig(float(ovj.att)),
-        "se_boot": sig(float(ovj.se_boot)),
         "se_jack": sig(float(ovj.se_jack)),
-        "ci_boot": [sig(float(ovj.ci_lo_boot)), sig(float(ovj.ci_hi_boot))],
         "ci_jack": [sig(float(ovj.ci_lo_jack)), sig(float(ovj.ci_hi_jack))],
-        "t_boot": sig(float(ovj.att / ovj.se_boot)),
         "t_jack": sig(float(ovj.att / ovj.se_jack)),
         "pct": sig(float(ovj.pct)),
     }
-    # sanity: the pooled placebo bootstrap SEs already in `placebo` must agree
-    # with intime_pooled_jack.csv's se_boot column (same committed values)
-    ipj = pd.read_csv(CSV / "intime_pooled_jack.csv").set_index("fake_t0")
-    for yr in (2009, 2007):
-        committed = placebo_pooled[f"pooled{yr}"]["multisynth"]["se"]  # sig(6)-rounded
-        assert abs(committed - float(ipj.loc[yr, "se_boot"])) < 1e-6, \
-            f"pooled{yr} bootstrap SE mismatch vs intime_pooled_jack.csv"
-    placebo_jack = {
-        str(yr): {
-            "att": sig(float(ipj.loc[yr, "att"])),
-            "se_jack": sig(float(ipj.loc[yr, "se_jack"])),
-            "t_jack": sig(float(ipj.loc[yr, "t_jack"])),
-        }
-        for yr in (2009, 2007)
-    }
 
+    annotations = {"california": {
+        "section": "III.C",
+        "reasons": [
+            "smallest first-stage dose in the sample: the least-treated state carries the largest estimated effect, and the first stage shows no dose gradient",
+            "the sign matches the donor-contamination bias, which is largest for late adopters",
+            "the interval rests on two post-treatment years, 2018 and 2019",
+        ],
+    }}
+
+    commit = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"], capture_output=True,
+        text=True, cwd=ROOT).stdout.strip() or "unknown"
     payload = {
-        "schema_version": 3,
+        "schema_version": 4,
         "meta": {
             "seed": 20260524,
             "deltas": deltas,
@@ -343,15 +413,21 @@ def main():
             "mde_drinks_per_month": sig(mde_drinks),
             "mde_jack_delta": sig(mde_jack),
             "mde_jack_drinks": sig(mde_jack_drinks),
+            "size_jack": size_jack,
+            "ri_p": sig(float(rp.p_two_sided)),
+            "ri_null_sd": sig(float(rp.null_sd)),
+            "commit": commit,
             "sources": SOURCES,
             "note": "Every value traces to a committed file in Results/csv/.",
         },
         "plausible_band": PLAUSIBLE_BAND,
+        "real": real,
+        "ri_null": ri_null,
         "estimators": estimators,
         "phased": phased,
         "placebo": placebo,
         "real_data": real_data,
-        "placebo_jack": placebo_jack,
+        "annotations": annotations,
     }
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
