@@ -1,13 +1,12 @@
-# Generates every LaTeX table fragment and in-text number macro for BOTH
-# papers from Results/csv/ and the processed data. Output: paper/gen/*.tex
-# (numbers.tex + tab_*.tex for main.tex; stats_numbers.tex +
-# stats_tab_power_rows.tex for stats.tex; gen/mechanism.tex and gen/screen.tex
-# come from Results/inference_outputs.py, which owns the fit computations).
-# No statistic in either paper is hand-typed — they all come from here.
+# Generates every LaTeX table fragment and in-text number macro for the
+# paper from Results/csv/ and the processed data. Output: paper/gen/*.tex
+# (numbers.tex + tab_*.tex; gen/screen.tex comes from
+# Results/inference_outputs.py).
+# No statistic in the paper is hand-typed — they all come from here.
 # Extracted from the notebook's table cell, which now calls this script.
 # Run from the repository root:  python notebook_src/make_tables.py
-# Primary inference for main.tex is the JACKKNIFE over units; the default wild
-# bootstrap appears only in table notes and in the stats-note fragments.
+# Primary inference is the jackknife over units, evaluated alongside the
+# design-calibrated randomization test.
 import os
 import numpy as np
 import pandas as pd
@@ -81,7 +80,6 @@ def main():
     pw = pd.read_csv(f'{CSV}/power_results.csv')
     mde = pd.read_csv(f'{CSV}/power_mde.csv').set_index('rule')
     mde_e = pd.read_csv(f'{CSV}/power_mde_by_estimator.csv').set_index('estimator')
-    jdiag = pd.read_csv(f'{CSV}/power_jackknife_diag.csv').set_index('delta')
     itp07 = pd.read_csv(f'{CSV}/intime_placebo_pooled2007.csv')
     # jackknife-primary inputs (R/11 standalone outputs)
     ovj = pd.read_csv(f'{CSV}/multisynth_overall_jack.csv').iloc[0]
@@ -146,7 +144,6 @@ def main():
     M.append(macro('maGapLo', f3(ma['gap_lo'].min())))
     M.append(macro('maGapHi', f3(ma['gap_hi'].max())))
     # power
-    M.append(macro('sizeBootDefault', f"{pw_ms.loc[0.0, 'reject_se'] * 100:.1f}"))
     M.append(macro('powRiTwo', f"{pw_ms.loc[-0.02, 'reject_ri'] * 100:.0f}"))
     M.append(macro('powRiFive', f"{pw_ms.loc[-0.05, 'reject_ri'] * 100:.0f}"))
     M.append(macro('powRiEight', f"{pw_ms.loc[-0.08, 'reject_ri'] * 100:.0f}"))
@@ -159,14 +156,12 @@ def main():
         sub = pw[(pw['estimator'] == e)].set_index('delta')
         M.append(macro(f'sizeSe{lab}', f"{sub.loc[0.0, 'reject_se'] * 100:.0f}"))
         M.append(macro(f'powRi{lab}', f"{sub.loc[-0.05, 'reject_ri'] * 100:.0f}"))
-    # envelope MDE (best-calibrated estimator) and jackknife diagnosis
+    # envelope MDE (best-calibrated estimator)
     env = mde_e[mde_e['envelope']].iloc[0]
     M.append(macro('mdeEnvelope', f"{abs(env['mde_ri']) * 100:.1f}"))
     M.append(macro('mdeEnvelopeDrinks', f"{env['mde_ri_drinks']:.1f}"))
     M.append(macro('envEstName', EST_NAMES[env.name].replace('(primary)', '').strip()))
-    M.append(macro('bootInfl', f"{jdiag.loc[0.0, 'se_inflation']:.1f}"))
-    M.append(macro('bootInflTwelve', f"{jdiag.loc[-0.12, 'se_inflation']:.1f}"))
-    # ---- jackknife-primary macros (R/11 outputs; main.tex reports these) ----
+    # ---- jackknife-primary macros (R/11 outputs; the paper reports these) ----
     ms3 = res3.loc['multisynth']
     ph3 = res3.loc[('multisynth_phased', -0.05)]
     assert abs(float(ovj['att']) - avg_att) < 1e-8, \
@@ -184,18 +179,14 @@ def main():
     for nm, dd in [('Two', -0.02), ('Five', -0.05), ('Eight', -0.08), ('Twelve', -0.12)]:
         M.append(macro(f'powJack{nm}', f"{ms3.loc[dd, 'reject_jack'] * 100:.0f}"))
     M.append(macro('powJackPhased', f"{ph3['reject_jack'] * 100:.0f}"))
-    # primary real-data estimate under both standard errors (Table 3 + notes)
+    # primary real-data estimate (Table 3)
     M.append(macro('seJackMultisynth', f"{ovj['se_jack']:.4f}"))
     M.append(macro('ciJackLo', f3(ovj['ci_lo_jack'])))
     M.append(macro('ciJackHi', f3(ovj['ci_hi_jack'])))
     M.append(macro('tJackMultisynth', f"{ovj['att'] / ovj['se_jack']:.2f}"))
-    M.append(macro('seBootMultisynth', f"{ovj['se_boot']:.4f}"))
-    M.append(macro('ciBootLo', f3(ovj['ci_lo_boot'])))
-    M.append(macro('ciBootHi', f3(ovj['ci_hi_boot'])))
     # pooled in-time placebos under the jackknife (Table 5 + note)
     M.append(macro('fakeJackTNine', f"{ipj.loc[2009, 't_jack']:.2f}"))
     M.append(macro('fakeJackTSvn', f"{ipj.loc[2007, 't_jack']:.2f}"))
-    M.append(macro('fakeBootSeNine', f"{ipj.loc[2009, 'se_boot']:.4f}"))
     # asymmetric detectability at the plausible-range endpoints (2% vs 4%)
     def interp_ri(est, d):
         s = pw[pw['estimator'] == est].set_index('delta').sort_index()
@@ -269,8 +260,7 @@ def main():
         f.write('\n'.join(lines) + '\n')
 
     # ---------------- Table: horse race ----------------
-    # Primary row reports the jackknife over units; the default wild bootstrap
-    # value moves to the table note (macros seBootMultisynth, ciBoot*).
+    # Primary row reports the jackknife over units.
     lines = []
     for e in EST_ORDER:
         a, s = rows[e]
@@ -303,7 +293,7 @@ def main():
         att_v, se_v, t_v = r['att'], r['se'], r['t_stat']
         if e == 'multisynth':
             # jackknife-primary: SE and t from the paired rerun; the point
-            # estimate is identical (asserted), the default SE goes to the note.
+            # estimate is identical (asserted).
             assert abs(float(ipj.loc[2009, 'att']) - float(r['att'])) < 1e-8, \
                 "pooled fake-2009 att diverges between committed files"
             se_v, t_v = ipj.loc[2009, 'se_jack'], ipj.loc[2009, 't_jack']
@@ -331,18 +321,6 @@ def main():
                  f"{rej(ph3['reject_jack'])} & {rej(ph3['reject_ri'])} & "
                  f"{ph3['mean_att']:.4f} \\\\")
     with open(f'{GEN}/tab_power_rows.tex', 'w', encoding='utf-8') as f:
-        f.write('\n'.join(lines) + '\n')
-
-    # stats.tex version: all three rules, default column retained.
-    lines = []
-    for d, r in ms3s.iterrows():
-        lines.append(f"{d * 100:.0f}\\% & {int(r['n_ok'])} & "
-                     f"{rej(r['reject_boot'])} & {rej(r['reject_jack'])} & "
-                     f"{rej(r['reject_ri'])} & {r['mean_att']:.4f} \\\\")
-    lines.append(f"$-5$\\% (3-yr phase-in) & {int(ph3['n_ok'])} & "
-                 f"{rej(ph3['reject_boot'])} & {rej(ph3['reject_jack'])} & "
-                 f"{rej(ph3['reject_ri'])} & {ph3['mean_att']:.4f} \\\\")
-    with open(f'{GEN}/stats_tab_power_rows.tex', 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines) + '\n')
 
     # ---------------- Table: power and MDE by estimator ----------------
@@ -398,8 +376,7 @@ def main():
         'beverage_spirits': 'Spirits ethanol only',
     }
     # Jackknife SEs throughout (robustness_jack.csv, paired with the committed
-    # variants — point estimates asserted identical). Default-bootstrap SEs
-    # stay in the replication materials.
+    # variants — point estimates asserted identical).
     lines = []
     for k, lab in rb_lab.items():
         r = rb.loc[k]
@@ -464,33 +441,6 @@ def main():
             first = ''
     with open(f'{GEN}/tab_balance_rows.tex', 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines) + '\n')
-
-    # ---------------- stats.tex macros (stats_numbers.tex) ----------------
-    # The companion note's numbers. Fit/mechanism macros (slope, correlations,
-    # max t, asymptote) live in gen/mechanism.tex from Results/inference_outputs.py.
-    S = []
-    S.append(macro('statNTreated', len(cf)))
-    S.append(macro('statNDonors', len(never)))
-    S.append(macro('statDrawsPerCell', n0j))
-    S.append(macro('statSizeBootDefault', f"{ms3.loc[0.0, 'reject_boot'] * 100:.1f}"))
-    S.append(macro('statBootInfl', f"{ms3.loc[0.0, 'ratio_boot']:.1f}"))
-    S.append(macro('statBootInflTwelve', f"{ms3.loc[-0.12, 'ratio_boot']:.1f}"))
-    S.append(macro('statJackInfl', f"{ms3.loc[0.0, 'ratio_jack']:.2f}"))
-    S.append(macro('statSizeJack', f"{ms3.loc[0.0, 'reject_jack'] * 100:.1f}"))
-    S.append(macro('statSizeJackLo', f"{lo0j * 100:.1f}"))
-    S.append(macro('statSizeJackHi', f"{hi0j * 100:.1f}"))
-    S.append(macro('statMdeJack', f"{abs(mde3.loc['jackknife', 'mde_delta']) * 100:.1f}"))
-    S.append(macro('statMdeRi', f"{abs(mri['mde_delta']) * 100:.1f}"))
-    S.append(macro('statAttPct', pct(ovj['att'])))
-    S.append(macro('statAttLog', f"{ovj['att']:.4f}"))
-    S.append(macro('statSeBoot', f"{ovj['se_boot']:.4f}"))
-    S.append(macro('statSeJack', f"{ovj['se_jack']:.4f}"))
-    S.append(macro('statTBoot', f"{ovj['att'] / ovj['se_boot']:.2f}"))
-    S.append(macro('statTJack', f"{ovj['att'] / ovj['se_jack']:.2f}"))
-    S.append(macro('statRiP', f"{ri['p_two_sided']:.2f}"))
-    with open(f'{GEN}/stats_numbers.tex', 'w', encoding='utf-8') as f:
-        f.write('% Auto-generated by notebook_src/make_tables.py — do not edit.\n'
-                + '\n'.join(S) + '\n')
 
     print(f"paper/gen written: {len(os.listdir(GEN))} files")
 

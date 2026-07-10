@@ -11,37 +11,26 @@ completion, Callaway-Sant'Anna, and TWFE) return positive-signed nulls of
 +0.7% to +2.8% (joint randomization-inference p = 0.17). (2) Backdated placebos at
 every feasible adoption year show every estimator produces −1% to −2% pseudo-effects
 on no-treatment windows. (3) A design-based power simulation gives every estimator a
-power curve and audits the inference attached to the primary estimator: the
-software-default test (a wild bootstrap over units) has zero power against any effect
-up to −12% (its SE is 1.7–6.5× the true sampling dispersion and grows with the injected
-effect), a jackknife on the same draws works but is mildly conservative (size 1.8% at
-δ = 0, MDE 7.2%), and with correctly calibrated inference the minimum detectable effect
-at 80% power ranges from 4.5% (Callaway-Sant'Anna) to 6.4% (primary). Effects in the
-low single digits, where the survey and smaller quasi-experimental evidence point, sit
-below the detection limit of every estimator and every rejection rule considered.
+power curve: the primary estimator's jackknife inference holds size (1.8% at δ = 0)
+with an MDE at 80% power of 7.2%, and with design-calibrated randomization inference
+the minimum detectable effect ranges from 4.5% (Callaway-Sant'Anna) to 6.4% (primary).
+Effects in the low single digits, where the survey and smaller quasi-experimental
+evidence point, sit below the detection limit of every estimator and every rejection
+rule considered.
 
 ## Interactive dashboard
 
-**Live at <https://alexr951.github.io/Cannabis_Alcohol_Substitution/>.** Two linked
-pages mirroring the paper's two contributions. **Findings** (`index.html`) covers the
-substitution question: the six-estimator forest of pooled nulls with the joint RI
-p-value, the backdated-placebo noise floor, and the power section, where a slider moves
-the true effect δ across the five simulated sizes (0 to −12%) driving the sampling
-distribution and the calibrated power curves, ending in the rejection-rate table whose
-all-zero default-bootstrap column links to the second page. **Mechanism**
-(`mechanism.html`) covers the inference failure: the replicate-variance formula, the
-SE-inflation chart (1.7×→6.5× against the jackknife's flat 1.27×), the per-draw scatter
-of squared SE against squared estimate with the prep-computed fitted slope, the bounded
-t-statistic view, and the three-rule power comparison. Both pages are a pure replay of
-the committed results in `Results/csv/`; nothing is estimated in the browser.
+**Live at <https://alexr951.github.io/Cannabis_Alcohol_Substitution/>.** A single-page
+explorer of the power simulation: a slider moves the true effect δ across the five
+simulated sizes (0 to −12%), driving the sampling distribution, the standard-error
+comparison, the observed noise floor, and the power curves. The page is a pure replay
+of the committed results in `Results/csv/`; nothing is estimated in the browser.
 `dashboard/prep/build_dashboard_data.py` packs the result CSVs into
-`dashboard/public/data/findings.json` and `mechanism.json` (with self-checks against the
-committed diagnostics and a generated-from commit stamp shown in the footers), and the
-front end is vanilla JavaScript and D3 with no build step. δ carries across pages via
-`?delta=`; old single-page `#` deep links still resolve. Deployment is automatic:
-`.github/workflows/deploy-pages.yml` publishes `dashboard/public/` to GitHub Pages on
-every push to `main`. To run locally, serve with `python -m http.server` from
-`dashboard/public`.
+`dashboard/public/data/power.json` (with self-checks against the committed
+diagnostics), and the front end is vanilla JavaScript and D3 with no build step.
+Deployment is automatic: `.github/workflows/deploy-pages.yml` publishes
+`dashboard/public/` to GitHub Pages on every push to `main`. To run locally, serve with
+`python -m http.server` from `dashboard/public`.
 
 ## Pipeline (hybrid Python + R)
 
@@ -52,10 +41,12 @@ run_all.R + R/01..10         estimation engine (cached): sample rules, six estim
                              scpi prediction intervals, in-time placebos, pooled RI,
                              power simulation, robustness suite
 R/11_power_jackknife.R       standalone: reruns the primary estimator's power draws
-                             with paired default-bootstrap and jackknife SEs and
-                             builds the three-rule comparison (~22 min cold)
-Results/inference_outputs.py appendix figure, Results/JACKKNIFE_MEMO.md, and the
-                             paper's generated macro fragments from those CSVs
+                             with jackknife SEs, paired one-for-one to the committed
+                             draws (~22 min cold)
+R/12_power_screen.R          standalone: repeats the power simulation with the fit
+                             screen applied inside each draw
+Results/inference_outputs.py the paper's screened-simulation macro fragment from
+                             those CSVs
 Results/csv/                 tidy results (every paper number traces here)
 Results/cache/               RDS caches (delete for a cold run; ~70 min on 6 cores)
 Results/figures/             all figures used in the paper
@@ -71,12 +62,13 @@ jupyter nbconvert --to notebook --execute --inplace cannabis_alcohol_scm.ipynb
 
 This runs data prep, the cached R pipeline (`Rscript run_all.R`; R 4.4+, packages
 installed by `R/00_setup.R` — augsynth and synthdid come from GitHub via remotes), the
-Python↔R port check, all figures, the results memo, and the paper table fragments.
+Python↔R port check, all figures, and the paper table fragments.
 Python dependencies: `pip install -r requirements.txt`. All randomness is seeded
-(`SEED = 20260524`); step runtimes are logged to `Results/runtimes.csv`. The three-rule
-inference comparison is a separate step: `Rscript R/11_power_jackknife.R` followed by
-`python Results/inference_outputs.py`. It asserts that its paired draws reproduce the
-committed `power_draws.csv` exactly before writing anything.
+(`SEED = 20260524`); step runtimes are logged to `Results/runtimes.csv`. The jackknife
+inference and screened simulation are separate steps: `Rscript R/11_power_jackknife.R`
+and `Rscript R/12_power_screen.R`, followed by `python Results/inference_outputs.py`.
+R/11 asserts that its paired draws reproduce the committed `power_draws.csv` exactly
+before writing anything.
 
 The paper's LaTeX source is kept outside this repository, but the paper is fully
 reproducible from the analysis here: no statistic in it is hand-typed — every table row
@@ -105,8 +97,8 @@ and in-text number is generated by `cannabis_alcohol_scm.ipynb` from `Results/cs
 - Inference: each estimator's native uncertainty, prediction intervals
   (Cattaneo–Feng–Titiunik 2021), pooled randomization inference, and a design-based
   power simulation with a pre-stated compute budget. For the primary estimator the
-  reported SE is the software default (a wild bootstrap over units); a jackknife over
-  units and an RI-calibrated rule are evaluated alongside it (`R/11_power_jackknife.R`).
+  reported SE is a jackknife over units, evaluated alongside a design-calibrated
+  randomization test (`R/11_power_jackknife.R`).
 
 ## Citation
 
