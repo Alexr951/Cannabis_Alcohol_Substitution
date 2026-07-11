@@ -130,7 +130,7 @@ body {
   gap: var(--gap);
   align-items: start;
 }
-.act3-side { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+.act3-main, .act3-side { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
 
 .panel {
   background: var(--panel);
