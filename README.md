@@ -2,7 +2,7 @@
 
 **Statistical Power and the Limits of Small-Sample Synthetic Control.** A multi-estimator
 and power analysis of recreational cannabis legalization and U.S. state-level alcohol sales.
-The compiled paper is [Published on SSRN](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7114559)
+The compiled paper is [published on SSRN](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7114559)
 at the repository root; the analysis pipeline that produces every number in it is in this repo.
 
 **Main results.** (1) Six estimators (partially-pooled augmented synthetic control
