@@ -1,5 +1,7 @@
 # Detecting Cannabis–Alcohol Substitution in Aggregate Sales Data
 
+[![DOI](https://img.shields.io/badge/DOI-10.2139%2Fssrn.7114559-blue.svg)](https://doi.org/10.2139/ssrn.7114559)
+
 **Statistical Power and the Limits of Small-Sample Synthetic Control.** A multi-estimator
 and power analysis of recreational cannabis legalization and U.S. state-level alcohol sales.
 The compiled paper is [published on SSRN](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7114559),
